@@ -3,9 +3,9 @@ export const demoClients = [
   { id: 'demo-1', full_name: 'Carla Mendoza', email: 'carla@fitcoach.mx', phone: '662 555 0148', status: 'active', goal: 'Bajar grasa corporal', height_cm: 165, notes: 'Evitar peso libre en pierna derecha.', created_at: '2026-08-10' },
   { id: 'demo-2', full_name: 'Ana García', email: 'ana@fitcoach.mx', phone: '662 555 0172', status: 'active', goal: 'Ganar fuerza', height_cm: 160, notes: '', created_at: '2026-08-12' },
   { id: 'demo-3', full_name: 'Jorge Pérez', email: 'jorge@fitcoach.mx', phone: '662 555 0161', status: 'active', goal: 'Hipertrofia', height_cm: 178, notes: '', created_at: '2026-08-17' },
-  { id: 'demo-4', full_name: 'Luis Torres', email: 'luis@fitcoach.mx', phone: '662 555 0185', status: 'expiring', goal: 'Aumentar masa muscular', height_cm: 173, notes: 'Revisar técnica de sentadilla.', created_at: '2026-08-20' },
-  { id: 'demo-5', full_name: 'María González', email: 'maria@fitcoach.mx', phone: '662 555 0134', status: 'expiring', goal: 'Tonificar', height_cm: 168, notes: '', created_at: '2026-08-22' },
-  { id: 'demo-6', full_name: 'Roberto Cruz', email: 'roberto@fitcoach.mx', phone: '662 555 0198', status: 'expired', goal: 'Fuerza base', height_cm: 181, notes: 'Retomar evaluación antes de activar.', created_at: '2026-07-20' },
+  { id: 'demo-4', full_name: 'Luis Torres', email: 'luis@fitcoach.mx', phone: '662 555 0185', status: 'invited', goal: 'Aumentar masa muscular', height_cm: 173, notes: 'Revisar técnica de sentadilla.', created_at: '2026-08-20' },
+  { id: 'demo-5', full_name: 'María González', email: 'maria@fitcoach.mx', phone: '662 555 0134', status: 'invited', goal: 'Tonificar', height_cm: 168, notes: '', created_at: '2026-08-22' },
+  { id: 'demo-6', full_name: 'Roberto Cruz', email: 'roberto@fitcoach.mx', phone: '662 555 0198', status: 'paused', goal: 'Fuerza base', height_cm: 181, notes: 'Retomar evaluación antes de activar.', created_at: '2026-07-20' },
 ];
 
 export const starterExercises = [

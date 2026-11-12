@@ -74,6 +74,7 @@ export function workoutReducer(s, action) {
       if (s.phase !== PHASE.WORK) return s;
       const log = {
         exerciseId: exercise.id ?? null,
+        routineExerciseId: exercise.routine_exercise_id ?? null, // requerido por fc_complete_my_workout
         exerciseName: exercise.name,
         set: s.set,
         reps: isTimed(exercise) ? null : Number(action.reps ?? exercise.reps_max ?? exercise.reps_min ?? 0) || null,

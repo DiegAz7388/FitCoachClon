@@ -10,7 +10,7 @@ import { colors } from '../src/lib/theme';
 
 const GOALS = [['fat_loss', 'Perder grasa'], ['muscle', 'Ganar músculo'], ['strength', 'Ganar fuerza'], ['general', 'Estar en forma']];
 const LEVELS = [['beginner', 'Principiante'], ['intermediate', 'Intermedio'], ['advanced', 'Avanzado']];
-const PLACES = [['gym', 'Gimnasio'], ['home', 'Casa']];
+const PLACES = [['gym', 'Gimnasio'], ['home', 'Casa'], ['mixed', 'Ambos']];
 const DAYS = [2, 3, 4, 5, 6].map((d) => [d, `${d} días`]);
 const MINUTES = [30, 45, 60, 90].map((m) => [m, `${m} min`]);
 const MUSCLES = [['glutes', 'Glúteos'], ['quads', 'Piernas'], ['abs', 'Abdomen'], ['pectorals', 'Pecho'], ['lats', 'Espalda'], ['delts', 'Hombros'], ['biceps', 'Bíceps'], ['triceps', 'Tríceps']];

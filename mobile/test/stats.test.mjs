@@ -39,5 +39,8 @@ test('día que toca', () => {
   assert.deepEqual(pickToday(days, NOW), { day: days[1], isToday: true, inDays: 0 });
   assert.equal(pickToday(days, new Date(2026, 10, 13)).inDays, 1, 'viernes → sábado');
   assert.equal(pickToday(days, new Date(2026, 10, 15)).day.day_of_week, 1, 'domingo → lunes');
+  const withSunday = [{ day_of_week: 3 }, { day_of_week: 7 }];
+  assert.deepEqual(pickToday(withSunday, new Date(2026, 10, 15)), { day: withSunday[1], isToday: true, inDays: 0 }, 'domingo es el día 7');
+  assert.equal(pickToday(withSunday, new Date(2026, 10, 13)).day.day_of_week, 7, 'viernes → domingo (7)');
   assert.equal(pickToday([], NOW), null);
 });

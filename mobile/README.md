@@ -12,8 +12,8 @@ App en **React Native + Expo** para los pacientes del nutriólogo. Usa el mismo 
 
 ## Requisitos previos (una sola vez)
 
-1. Aplicar en Supabase la migración y el catálogo (ver `../supabase/README.md`).
-2. El nutriólogo registra al paciente en el panel con su **correo**. El paciente crea su cuenta en la app con ese mismo correo y queda vinculado automáticamente.
+1. Aplicar en Supabase la migración y el catálogo (ver `../supabase/README.md`). Mantén activo **Confirm email** en Supabase Auth.
+2. El nutriólogo registra al paciente en el panel con su **correo** (queda "Invitado"). El paciente crea su cuenta en la app con ese mismo correo, lo confirma y queda vinculado automáticamente ("Activo").
 
 ## Ejecutar en tu celular
 

@@ -11,7 +11,9 @@ const catalog: Candidate[] = [
 ];
 
 const a = normalizeAnswers({ goal: 'hackear' as never, days_per_week: 12, session_minutes: 5, training_location: 'home', priority_muscles: ['abs'] });
-assert(a.goal === 'general' && a.days_per_week === 6 && a.session_minutes === 20, 'normaliza valores fuera de rango');
+assert(a.goal === 'general' && a.days_per_week === 6 && a.session_minutes === 30, 'normaliza valores fuera de rango (minutos a 30/45/60/90)');
+assert(normalizeAnswers({ session_minutes: 50 }).session_minutes === 45 && normalizeAnswers({ session_minutes: 80 }).session_minutes === 90, 'ajusta minutos al valor permitido más cercano');
+assert(normalizeAnswers({ training_location: 'mixed' }).training_location === 'mixed', 'acepta lugar mixto');
 
 const home = selectCandidates(catalog, a, 14, () => 0.5);
 assert(home.every((e) => !['barbell'].includes(e.equipment!)) && home.length === 3, 'en casa excluye barras');
@@ -32,9 +34,11 @@ const plan = sanitizePlan({
     { day_of_week: 3, label: 'repetido', exercises: [{ exercise_id: 4, sets: 3, reps_min: 10, reps_max: 12, duration_seconds: null, rest_seconds: 60, notes: null }] },
     { day_of_week: 1, label: 'Lunes', exercises: [{ exercise_id: 4, sets: 3, reps_min: 10, reps_max: 12, duration_seconds: null, rest_seconds: 60, notes: null }] },
     { day_of_week: 5, label: 'vacío', exercises: [{ exercise_id: 999, sets: 3, reps_min: 1, reps_max: 1, duration_seconds: null, rest_seconds: 60, notes: null }] },
+    { day_of_week: 0, label: '', exercises: [{ exercise_id: 3, sets: 2, reps_min: null, reps_max: null, duration_seconds: 30, rest_seconds: 30, notes: null }] },
   ],
 }, { ...a, days_per_week: 3 }, home);
-assert(plan.days.map((d) => d.day_of_week).join() === '1,3', 'quita días repetidos/vacíos y ordena desde lunes');
+assert(plan.days.map((d) => d.day_of_week).join() === '1,3,7', 'quita días repetidos/vacíos, domingo 0 → 7 y ordena desde lunes');
+assert(plan.days[2].label === 'Domingo', 'etiqueta por defecto del domingo');
 const wed = plan.days[1].exercises;
 assert(wed.length === 2, 'quita ids inventados y duplicados');
 assert(wed[0].sets === 6 && wed[0].rest_seconds === 15 && wed[0].reps_max! >= wed[0].reps_min!, 'acota series, descanso y rango de reps');

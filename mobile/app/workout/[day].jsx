@@ -77,15 +77,16 @@ export default function Workout() {
 
   // Guardado automático al terminar.
   const summary = useMemo(() => getSummary(state), [state]);
+  const [saveError, setSaveError] = useState('');
   async function persist() {
     if (!state.logs.length) { setSaveStatus('saved'); return; }
-    setSaveStatus('saving');
+    setSaveStatus('saving'); setSaveError('');
     try {
-      await saveWorkout({ clientId: client.id, routineId: routine.id, dayOfWeek: Number(day), state, summary });
+      await saveWorkout({ routineId: routine.id, dayOfWeek: Number(day), state });
       setSaveStatus('saved');
       refresh();
-    } catch {
-      setSaveStatus('error');
+    } catch (e) {
+      setSaveStatus('error'); setSaveError(e.message);
     }
   }
   useEffect(() => { if (state.phase === PHASE.DONE && saveStatus === 'idle') persist(); }); // eslint-disable-line react-hooks/exhaustive-deps
@@ -125,12 +126,12 @@ export default function Workout() {
 
       {state.phase === PHASE.WORK && exercise && (
         <WorkView key={`${state.exIndex}-${state.set}`} state={state} exercise={exercise} now={now} dispatch={dispatch}
-          last={lastPerformance(sessions.flatMap((s) => s.fc_set_logs || []))[exercise.name]}
+          last={lastPerformance(sessions.flatMap((s) => s.sets || []))[exercise.name]}
           showHow={showHow} setShowHow={setShowHow} />
       )}
       {state.phase === PHASE.REST && <RestView state={state} now={now} next={next} dispatch={dispatch} />}
       {state.phase === PHASE.DONE && (
-        <DoneView summary={summary} saveStatus={saveStatus} onRetry={persist} onClose={() => router.back()} dayLabel={plan.label} />
+        <DoneView summary={summary} saveStatus={saveStatus} saveError={saveError} onRetry={persist} onClose={() => router.back()} dayLabel={plan.label} />
       )}
     </SafeAreaView>
   );
@@ -241,7 +242,7 @@ function RestView({ state, now, next, dispatch }) {
   );
 }
 
-function DoneView({ summary, saveStatus, onRetry, onClose, dayLabel }) {
+function DoneView({ summary, saveStatus, saveError, onRetry, onClose, dayLabel }) {
   return (
     <View style={{ flex: 1, padding: 20, justifyContent: 'center' }}>
       <View style={{ alignItems: 'center' }}>
@@ -258,7 +259,7 @@ function DoneView({ summary, saveStatus, onRetry, onClose, dayLabel }) {
         <SummaryBox label="Volumen" value={`${summary.volume.toLocaleString('es-MX')} kg`} />
       </View>
       <Text style={{ color: saveStatus === 'error' ? colors.red : colors.muted, textAlign: 'center', marginTop: 18 }}>
-        {saveStatus === 'saving' ? 'Guardando…' : saveStatus === 'saved' ? 'Guardado en tu progreso ✓' : saveStatus === 'error' ? 'No se pudo guardar. Revisa tu conexión.' : ''}
+        {saveStatus === 'saving' ? 'Guardando…' : saveStatus === 'saved' ? 'Guardado en tu progreso ✓' : saveStatus === 'error' ? saveError || 'No se pudo guardar. Revisa tu conexión.' : ''}
       </Text>
       {saveStatus === 'error' && <Button title="Reintentar" variant="ghost" style={{ marginTop: 10 }} onPress={onRetry} />}
       <Button title="Listo" style={{ marginTop: 12 }} disabled={saveStatus === 'saving'} onPress={onClose} />

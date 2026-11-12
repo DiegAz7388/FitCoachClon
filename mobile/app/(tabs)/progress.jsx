@@ -9,10 +9,12 @@ import { bestLifts, weeklyCounts } from '../../src/lib/stats';
 import { colors } from '../../src/lib/theme';
 
 const shortDate = (value) => new Date(value).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' });
+// Campos y rangos de fc_body_measurements (Arnold V2).
 const METRICS = [
-  { key: 'weight_kg', label: 'Peso', unit: ' kg' },
-  { key: 'body_fat_pct', label: '% grasa', unit: '%' },
-  { key: 'waist_cm', label: 'Cintura', unit: ' cm' },
+  { key: 'weight_kg', label: 'Peso', unit: ' kg', min: 10, max: 700 },
+  { key: 'body_fat_percent', label: '% grasa', unit: '%', min: 0, max: 100 },
+  { key: 'muscle_mass_kg', label: 'Músculo', unit: ' kg', min: 0, max: 500 },
+  { key: 'waist_cm', label: 'Cintura', unit: ' cm', min: 20, max: 400 },
 ];
 
 export default function Progress() {
@@ -21,8 +23,8 @@ export default function Progress() {
   const completed = useMemo(() => sessions.filter((s) => s.completed_at), [sessions]);
   const weeks = useMemo(() => weeklyCounts(completed, 8).map((w) => ({ value: w.count, label: `${w.start.getDate()}/${w.start.getMonth() + 1}` })), [completed]);
   const volume = useMemo(() => completed.filter((s) => Number(s.total_volume_kg) > 0).slice(-12).map((s) => ({ value: Math.round(Number(s.total_volume_kg)), label: shortDate(s.completed_at) })), [completed]);
-  const body = useMemo(() => measurements.filter((m) => m[metric] != null).map((m) => ({ value: Number(m[metric]), label: shortDate(`${m.measured_at}T12:00:00`) })), [measurements, metric]);
-  const records = useMemo(() => bestLifts(completed.flatMap((s) => s.fc_set_logs || [])).slice(0, 8), [completed]);
+  const body = useMemo(() => measurements.filter((m) => m[metric] != null).map((m) => ({ value: Number(m[metric]), label: shortDate(`${m.measured_on}T12:00:00`) })), [measurements, metric]);
+  const records = useMemo(() => bestLifts(completed.flatMap((s) => s.sets || [])).slice(0, 8), [completed]);
   const current = METRICS.find((m) => m.key === metric);
 
   return (
@@ -47,7 +49,7 @@ export default function Progress() {
               ))}
             </View>
             <LineChart points={body} unit={current.unit} empty="Registra tu primera medida abajo." />
-            <MeasurementForm clientId={client.id} onSaved={refresh} />
+            <MeasurementForm onSaved={refresh} />
           </Card>
 
           <Card>
@@ -71,30 +73,32 @@ export default function Progress() {
   );
 }
 
-function MeasurementForm({ clientId, onSaved }) {
+function MeasurementForm({ onSaved }) {
+  const empty = { weight_kg: '', body_fat_percent: '', muscle_mass_kg: '', waist_cm: '' };
   const [open, setOpen] = useState(false);
-  const [values, setValues] = useState({ weight_kg: '', body_fat_pct: '', waist_cm: '' });
+  const [values, setValues] = useState(empty);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const num = (v) => (v.trim() === '' ? null : Number(v.replace(',', '.')));
 
   async function save() {
-    const payload = { weight_kg: num(values.weight_kg), body_fat_pct: num(values.body_fat_pct), waist_cm: num(values.waist_cm) };
+    const payload = Object.fromEntries(METRICS.map((m) => [m.key, num(values[m.key])]));
     if (Object.values(payload).every((v) => v == null)) { setError('Escribe al menos una medida.'); return; }
-    if (Object.values(payload).some((v) => v != null && (Number.isNaN(v) || v <= 0))) { setError('Revisa los números.'); return; }
+    const bad = METRICS.find((m) => payload[m.key] != null && (Number.isNaN(payload[m.key]) || payload[m.key] < m.min || payload[m.key] > m.max));
+    if (bad) { setError(`${bad.label}: escribe un valor entre ${bad.min} y ${bad.max}.`); return; }
     setBusy(true); setError('');
     try {
-      await addMeasurement(clientId, payload);
-      setValues({ weight_kg: '', body_fat_pct: '', waist_cm: '' }); setOpen(false); onSaved();
+      await addMeasurement(payload);
+      setValues(empty); setOpen(false); onSaved();
     } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
 
   if (!open) return <Button title="+ Registrar medida de hoy" variant="ghost" style={{ marginTop: 12 }} onPress={() => setOpen(true)} />;
   return (
     <View style={{ marginTop: 8 }}>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         {METRICS.map((m) => (
-          <View key={m.key} style={{ flex: 1 }}>
+          <View key={m.key} style={{ width: '47%', flexGrow: 1 }}>
             <Text style={ui.label}>{m.label}</Text>
             <TextInput style={ui.input} keyboardType="decimal-pad" value={values[m.key]} onChangeText={(t) => setValues({ ...values, [m.key]: t })} placeholder={m.unit.trim()} placeholderTextColor={colors.muted} />
           </View>

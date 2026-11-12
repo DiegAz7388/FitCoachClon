@@ -3,7 +3,8 @@ import { Modal } from '../components/common.jsx';
 import { EXERCISE_MEDIA_BASE } from '../lib/format.js';
 import { useFitCoach } from '../state.jsx';
 
-const DAY_OPTIONS = [[1, 'Lunes'], [2, 'Martes'], [3, 'Miércoles'], [4, 'Jueves'], [5, 'Viernes'], [6, 'Sábado'], [0, 'Domingo']];
+// Arnold V2: 1 = Lunes … 7 = Domingo.
+const DAY_OPTIONS = [[1, 'Lunes'], [2, 'Martes'], [3, 'Miércoles'], [4, 'Jueves'], [5, 'Viernes'], [6, 'Sábado'], [7, 'Domingo']];
 const TIMED_HINT = /plank|plancha|hold|wall sit|isometric|jump rope|run|bike|cardio/i;
 
 // Configuración inicial razonable según el tipo de ejercicio.
@@ -179,8 +180,8 @@ function AiBuilder({ clientId }) {
   async function propose() {
     setBusy('propose');
     try {
-      const result = await proposeAiRoutine(clientId, answers);
-      setPlan({ ...result, days: result.days.map((day) => ({ ...day, exercises: day.exercises.map((e) => ({ ...e, cfg: toCfg(e) })) })) });
+      const { plan: result, request_id: requestId } = await proposeAiRoutine(clientId, answers);
+      setPlan({ ...result, requestId, days: result.days.map((day) => ({ ...day, exercises: day.exercises.map((e) => ({ ...e, cfg: toCfg(e) })) })) });
     } catch (error) { toast(error.message); } finally { setBusy(''); }
   }
 
@@ -191,7 +192,7 @@ function AiBuilder({ clientId }) {
     };
     if (!reviewed.days.length) { toast('La rutina no tiene ejercicios.'); return; }
     setBusy('assign');
-    try { await assignAiRoutine(clientId, answers, reviewed); } catch (error) { toast(error.message); setBusy(''); }
+    try { await assignAiRoutine(clientId, answers, reviewed, plan.requestId); } catch (error) { toast(error.message); setBusy(''); }
   }
 
   const updateExercise = (dayIndex, exIndex, patch) => setPlan((current) => ({
@@ -214,7 +215,7 @@ function AiBuilder({ clientId }) {
         </label>
         <label>Lugar
           <select className="select" value={answers.training_location} onChange={set('training_location')}>
-            <option value="gym">Gimnasio</option><option value="home">Casa</option>
+            <option value="gym">Gimnasio</option><option value="home">Casa</option><option value="mixed">Ambos</option>
           </select>
         </label>
         <label>Días por semana

@@ -3,9 +3,9 @@
 export type Answers = {
   goal: string;                 // fat_loss | muscle | strength | general
   experience_level: string;     // beginner | intermediate | advanced
-  training_location: string;    // gym | home
+  training_location: string;    // gym | home | mixed (valores de fc_routines)
   days_per_week: number;        // 1–6
-  session_minutes: number;      // 20–120
+  session_minutes: number;      // 30 | 45 | 60 | 90 (CHECK de fc_routines)
   priority_muscles?: string[];
   limitations?: string;         // lesiones o restricciones en texto libre
 };
@@ -16,7 +16,10 @@ export type PlanExercise = { exercise_id: number; sets: number; reps_min: number
 export type Plan = { name: string; summary: string; days: { day_of_week: number; label: string; exercises: PlanExercise[] }[] };
 
 const HOME_EQUIPMENT = new Set(['body weight', 'dumbbell', 'band', 'resistance band', 'kettlebell', 'stability ball', 'medicine ball', 'roller', 'wheel roller', 'bosu ball', 'weighted']);
-const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+// Arnold V2 usa day_of_week 1–7 (1 = Lunes … 7 = Domingo).
+const DAY_LABELS = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const SESSION_MINUTES = [30, 45, 60, 90];
+export const snapMinutes = (value: number) => SESSION_MINUTES.reduce((best, m) => (Math.abs(m - value) < Math.abs(best - value) ? m : best), 45);
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(value)));
 
 export function normalizeAnswers(raw: Partial<Answers>): Answers {
@@ -24,9 +27,9 @@ export function normalizeAnswers(raw: Partial<Answers>): Answers {
   return {
     goal: pick(raw.goal, ['fat_loss', 'muscle', 'strength', 'general'], 'general'),
     experience_level: pick(raw.experience_level, ['beginner', 'intermediate', 'advanced'], 'beginner'),
-    training_location: pick(raw.training_location, ['gym', 'home'], 'gym'),
+    training_location: pick(raw.training_location, ['gym', 'home', 'mixed'], 'gym'),
     days_per_week: clamp(Number(raw.days_per_week) || 3, 1, 6),
-    session_minutes: clamp(Number(raw.session_minutes) || 45, 20, 120),
+    session_minutes: snapMinutes(Number(raw.session_minutes) || 45),
     priority_muscles: Array.isArray(raw.priority_muscles) ? raw.priority_muscles.map(String).slice(0, 6) : [],
     limitations: typeof raw.limitations === 'string' ? raw.limitations.slice(0, 500) : '',
   };
@@ -34,7 +37,7 @@ export function normalizeAnswers(raw: Partial<Answers>): Answers {
 
 // Reduce el catálogo a una lista manejable para el modelo, equilibrada por músculo.
 export function selectCandidates(all: Candidate[], answers: Answers, perMuscle = 14, random = Math.random): Candidate[] {
-  const allowed = all.filter((e) => answers.training_location === 'gym' || HOME_EQUIPMENT.has(e.equipment ?? 'body weight'));
+  const allowed = all.filter((e) => answers.training_location !== 'home' || HOME_EQUIPMENT.has(e.equipment ?? 'body weight'));
   const groups = new Map<string, Candidate[]>();
   for (const exercise of allowed) {
     const key = exercise.muscle_group || 'general';
@@ -93,12 +96,12 @@ export function buildPrompt(answers: Answers, candidates: Candidate[], clientGoa
     'Reglas: cada día de 4 a 8 ejercicios según el tiempo disponible; compuestos primero; reparte grupos musculares durante la semana.',
     'Ejercicios de fuerza: usa reps_min/reps_max y duration_seconds = null. Planchas, cardio o isométricos: usa duration_seconds (15–120) y reps_min/reps_max = null.',
     'Descanso entre series de 30 a 180 segundos (más en fuerza, menos en pérdida de grasa). Series de 2 a 5.',
-    'day_of_week: 1=Lunes … 6=Sábado, 0=Domingo; días no consecutivos cuando sea posible.',
+    'day_of_week: 1=Lunes, 2=Martes, 3=Miércoles, 4=Jueves, 5=Viernes, 6=Sábado, 7=Domingo; días no consecutivos cuando sea posible.',
     'Respeta lesiones o limitaciones evitando ejercicios que las comprometan. notes: un consejo breve de técnica o null.',
   ].join('\n');
   const user = [
     `Objetivo: ${goals[answers.goal]}${clientGoal ? ` (expediente: "${clientGoal}")` : ''}`,
-    `Nivel: ${answers.experience_level}. Lugar: ${answers.training_location === 'home' ? 'casa' : 'gimnasio'}.`,
+    `Nivel: ${answers.experience_level}. Lugar: ${({ home: 'casa', gym: 'gimnasio', mixed: 'casa y gimnasio' } as Record<string, string>)[answers.training_location]}.`,
     `Días por semana: ${answers.days_per_week}. Minutos por sesión: ${answers.session_minutes}.`,
     `Músculos prioritarios: ${answers.priority_muscles?.join(', ') || 'ninguno'}.`,
     `Limitaciones: ${answers.limitations || 'ninguna'}.`,
@@ -115,7 +118,7 @@ export function sanitizePlan(raw: Plan, answers: Answers, candidates: Candidate[
   const usedDays = new Set<number>();
   const days = [];
   for (const day of raw.days ?? []) {
-    const dow = clamp(Number(day.day_of_week), 0, 6);
+    const dow = Number(day.day_of_week) === 0 ? 7 : clamp(Number(day.day_of_week), 1, 7);
     if (usedDays.has(dow)) continue;
     const seen = new Set<number>();
     const exercises = (day.exercises ?? []).filter((e) => valid.has(e.exercise_id) && !seen.has(e.exercise_id) && seen.add(e.exercise_id)).slice(0, 10).map((e) => {
@@ -136,6 +139,6 @@ export function sanitizePlan(raw: Plan, answers: Answers, candidates: Candidate[
     days.push({ day_of_week: dow, label: String(day.label || DAY_LABELS[dow]).slice(0, 40), exercises });
   }
   if (!days.length) throw new Error('La IA no devolvió una rutina válida. Intenta de nuevo.');
-  days.sort((a, b) => ((a.day_of_week || 7) - (b.day_of_week || 7)));
+  days.sort((a, b) => a.day_of_week - b.day_of_week);
   return { name: String(raw.name || 'Rutina personalizada').slice(0, 80), summary: String(raw.summary || '').slice(0, 400), days: days.slice(0, answers.days_per_week) };
 }

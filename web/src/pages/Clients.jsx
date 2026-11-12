@@ -19,8 +19,7 @@ export default function Clients() {
           <select className="select" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
             <option value="all">Todos los estados</option>
             <option value="active">Activos</option>
-            <option value="expiring">Por revisar</option>
-            <option value="expired">Inactivos</option>
+            <option value="invited">Invitados</option>
             <option value="paused">Pausados</option>
           </select>
           <span className="muted">{rows.length} resultado(s)</span>

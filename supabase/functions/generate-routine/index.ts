@@ -1,15 +1,14 @@
-// Edge Function: genera una rutina con OpenAI a partir del catálogo fc_exercises.
+// Edge Function: genera una rutina con OpenAI usando el catálogo fc_exercises (esquema Arnold V2).
 //
 // POST /functions/v1/generate-routine   (Authorization: Bearer <JWT del usuario>)
-// { answers: {...}, client_id?: number, save?: boolean, plan?: Plan }
-//   - Paciente (app móvil): sin client_id; se usa su expediente y se guarda.
-//   - Nutriólogo (panel): con client_id; save=false devuelve la propuesta para revisarla.
-//     Después envía { client_id, answers, plan, save: true } con la propuesta ya revisada:
-//     se valida contra el catálogo y se guarda sin volver a llamar a OpenAI.
+//   Paciente (app):  { answers }                              → genera y guarda su rutina.
+//   Nutriólogo (panel): { client_id, answers }                → propuesta para revisar (no guarda).
+//                       { client_id, answers, plan, request_id } → guarda la propuesta revisada, sin volver a llamar a OpenAI.
+// Cada solicitud queda registrada en fc_ai_routine_requests (+ fc_ai_request_days).
 //
 // Secretos: OPENAI_API_KEY (obligatorio), OPENAI_MODEL (opcional).
 // SUPABASE_URL, SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY los pone Supabase automáticamente.
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { buildPrompt, type Candidate, normalizeAnswers, PLAN_SCHEMA, type Plan, sanitizePlan, selectCandidates } from './plan.ts';
 
 const cors = {
@@ -18,97 +17,136 @@ const cors = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
+class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
+
+// Mismo criterio que private.fc_can_write_client: admin, nutriólogo principal o staff con acceso "coach".
+async function canWriteClient(admin: SupabaseClient, userId: string, role: string, clientId: number) {
+  const { data: client } = await admin.from('fc_clients').select('id, primary_trainer_id, status').eq('id', clientId).maybeSingle();
+  if (!client || client.status === 'archived') return false;
+  if (role === 'admin' || client.primary_trainer_id === userId) return true;
+  const { data: staff } = await admin.from('fc_client_staff').select('access_level').eq('client_id', clientId).eq('staff_user_id', userId).maybeSingle();
+  return staff?.access_level === 'coach';
+}
+
+async function askOpenAI(system: string, prompt: string): Promise<Plan> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY');
+  if (!apiKey) throw new HttpError(500, 'Falta configurar OPENAI_API_KEY en los secretos de Supabase.');
+  const ai = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini',
+      messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+      response_format: { type: 'json_schema', json_schema: { name: 'rutina', strict: true, schema: PLAN_SCHEMA } },
+    }),
+  });
+  if (!ai.ok) {
+    console.error('OpenAI', ai.status, await ai.text());
+    throw new HttpError(502, 'El servicio de IA no respondió. Intenta de nuevo en unos minutos.');
+  }
+  const completion = await ai.json();
+  return JSON.parse(completion.choices[0].message.content) as Plan;
+}
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (request.method !== 'POST') return json({ error: 'Método no permitido.' }, 405);
 
-  try {
-    const authHeader = request.headers.get('Authorization') ?? '';
-    const url = Deno.env.get('SUPABASE_URL')!;
-    // Cliente con los permisos del usuario: respeta RLS para saber a qué expediente tiene acceso.
-    const asUser = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authHeader } } });
-    const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const url = Deno.env.get('SUPABASE_URL')!;
+  const admin = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  let requestId: number | null = null;
 
+  try {
+    const asUser = createClient(url, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: request.headers.get('Authorization') ?? '' } } });
     const { data: { user } } = await asUser.auth.getUser();
-    if (!user) return json({ error: 'Inicia sesión para generar una rutina.' }, 401);
+    if (!user) throw new HttpError(401, 'Inicia sesión para generar una rutina.');
+    const role = String(user.app_metadata?.role ?? 'patient');
 
     const body = await request.json().catch(() => ({}));
     const answers = normalizeAnswers(body.answers ?? {});
 
-    let clientId: number | null = null;
-    let isPatient = false;
+    // ¿Para qué expediente?
+    let clientId: number;
+    let isPatient: boolean;
     if (body.client_id != null) {
-      const { data } = await asUser.from('fc_clients').select('id, user_id').eq('id', body.client_id).maybeSingle();
-      if (!data) return json({ error: 'No tienes acceso a este paciente.' }, 403);
-      clientId = data.id;
-      isPatient = data.user_id === user.id;
+      if (role !== 'trainer' && role !== 'admin') throw new HttpError(403, 'Solo el equipo puede generar rutinas para un paciente.');
+      if (!(await canWriteClient(admin, user.id, role, Number(body.client_id)))) throw new HttpError(403, 'No tienes permiso para editar a este paciente.');
+      clientId = Number(body.client_id);
+      isPatient = false;
     } else {
-      const { data } = await asUser.rpc('fc_claim_client');
-      if (!data) return json({ error: 'Tu cuenta no está vinculada a un expediente. Pide a tu nutriólogo que registre tu correo.' }, 403);
-      clientId = data;
+      const { data: me } = await asUser.rpc('fc_claim_my_client');
+      if (!me?.id) throw new HttpError(403, 'Tu cuenta no está vinculada a un expediente. Pide a tu nutriólogo que registre tu correo.');
+      clientId = me.id;
       isPatient = true;
     }
-    const save = isPatient ? true : body.save === true;
+    const reviewedPlan = !isPatient && body.plan ? (body.plan as Plan) : null;
+    const save = isPatient || Boolean(reviewedPlan);
 
-    const { data: client } = await admin.from('fc_clients').select('goal, notes').eq('id', clientId).single();
+    const { data: client } = await admin.from('fc_clients').select('goal').eq('id', clientId).single();
     const { data: catalog, error: catalogError } = await admin
-      .from('fc_exercises').select('id, name, muscle_group, equipment, category').eq('is_active', true).not('gif_url', 'is', null);
+      .from('fc_exercises').select('id, name, muscle_group, equipment, exercise_type').eq('is_active', true).not('gif_url', 'is', null);
     if (catalogError) throw catalogError;
-    if (!catalog?.length) return json({ error: 'El catálogo fc_exercises está vacío. Carga supabase/seed/exercises.sql.' }, 500);
+    if (!catalog?.length) throw new HttpError(500, 'El catálogo de ejercicios está vacío. Carga los archivos de supabase/seed/.');
+    const all = catalog.map((e) => ({ ...e, category: e.exercise_type })) as Candidate[];
+
+    // Registro de la solicitud (la propuesta revisada reutiliza la solicitud original).
+    requestId = reviewedPlan && body.request_id ? Number(body.request_id) : null;
+    if (!requestId) {
+      const { data: req, error } = await admin.from('fc_ai_routine_requests').insert({
+        client_id: clientId, requested_by: user.id, training_location: answers.training_location,
+        focus_mode: answers.priority_muscles?.length ? 'focused' : 'balanced', priority_muscles: answers.priority_muscles ?? [],
+        session_minutes: answers.session_minutes, experience_level: answers.experience_level,
+        injury_notes: answers.limitations || null, status: 'processing',
+      }).select('id').single();
+      if (error) throw error;
+      requestId = req.id;
+    }
 
     let plan: Plan;
     let candidates: Candidate[];
-    if (body.plan && !isPatient) {
-      // Propuesta revisada por el nutriólogo: solo se valida.
-      candidates = catalog as Candidate[];
-      plan = sanitizePlan(body.plan as Plan, { ...answers, days_per_week: 7 }, candidates);
+    if (reviewedPlan) {
+      candidates = all;
+      plan = sanitizePlan(reviewedPlan, { ...answers, days_per_week: 7 }, candidates);
     } else {
-      candidates = selectCandidates(catalog as Candidate[], answers);
+      candidates = selectCandidates(all, answers);
       const { system, user: prompt } = buildPrompt(answers, candidates, client?.goal);
-
-      const apiKey = Deno.env.get('OPENAI_API_KEY');
-      if (!apiKey) return json({ error: 'Falta configurar OPENAI_API_KEY en los secretos de Supabase.' }, 500);
-      const ai = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini',
-          messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
-          response_format: { type: 'json_schema', json_schema: { name: 'rutina', strict: true, schema: PLAN_SCHEMA } },
-        }),
-      });
-      if (!ai.ok) {
-        console.error('OpenAI', ai.status, await ai.text());
-        return json({ error: 'El servicio de IA no respondió. Intenta de nuevo en unos minutos.' }, 502);
-      }
-      const completion = await ai.json();
-      plan = sanitizePlan(JSON.parse(completion.choices[0].message.content) as Plan, answers, candidates);
+      plan = sanitizePlan(await askOpenAI(system, prompt), answers, candidates);
     }
 
     const byId = new Map(candidates.map((e) => [e.id, e]));
     const detailed = { ...plan, days: plan.days.map((d) => ({ ...d, exercises: d.exercises.map((e) => ({ ...e, name: byId.get(e.exercise_id)?.name })) })) };
-    if (!save) return json({ plan: detailed, answers });
 
-    // Guardar: desactiva la rutina anterior y crea la nueva.
-    await admin.from('fc_routines').update({ is_active: false }).eq('client_id', clientId).eq('is_active', true);
+    if (!save) {
+      await admin.from('fc_ai_routine_requests').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', requestId);
+      return json({ request_id: requestId, plan: detailed, answers });
+    }
+
+    // Guardar: la nueva rutina reemplaza a la activa del paciente.
+    await admin.from('fc_routines').update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('client_id', clientId).is('archived_at', null).or('is_active.is.null,is_active.eq.true'); // neq excluiría los NULL
     const { data: routine, error: routineError } = await admin.from('fc_routines').insert({
-      client_id: clientId, created_by: user.id, name: plan.name, source: 'ai', goal: answers.goal,
-      experience_level: answers.experience_level, training_location: answers.training_location, focus_mode: 'balanced',
-      priority_muscles: answers.priority_muscles, session_minutes: answers.session_minutes, days_per_week: plan.days.length, is_active: true,
+      client_id: clientId, created_by: user.id, name: plan.name, source: 'fito_ai', goal: answers.goal,
+      experience_level: answers.experience_level, training_location: answers.training_location,
+      focus_mode: answers.priority_muscles?.length ? 'focused' : 'balanced', priority_muscles: answers.priority_muscles ?? [],
+      session_minutes: answers.session_minutes, days_per_week: plan.days.length, is_active: true,
     }).select('id').single();
     if (routineError) throw routineError;
     const { error: daysError } = await admin.from('fc_routine_days').insert(plan.days.map((d) => ({ routine_id: routine.id, day_of_week: d.day_of_week, label: d.label })));
     if (daysError) throw daysError;
     const { error: exError } = await admin.from('fc_routine_exercises').insert(plan.days.flatMap((d) => d.exercises.map((e, index) => ({
       routine_id: routine.id, exercise_id: e.exercise_id, day_of_week: d.day_of_week, order_index: index + 1, sets: e.sets,
-      reps_min: e.reps_min ?? 1, reps_max: e.reps_max ?? 1, duration_seconds: e.duration_seconds, rest_seconds: e.rest_seconds, notes: e.notes,
+      reps_min: e.reps_min, reps_max: e.reps_max, duration_seconds: e.duration_seconds, rest_seconds: e.rest_seconds, notes: e.notes,
     }))));
     if (exError) throw exError;
 
-    return json({ routine_id: routine.id, plan: detailed });
+    await admin.from('fc_ai_routine_requests').update({ status: 'completed', completed_at: new Date().toISOString(), generated_routine_id: routine.id }).eq('id', requestId);
+    await admin.from('fc_ai_request_days').upsert(plan.days.map((d) => ({ request_id: requestId, day_of_week: d.day_of_week })), { onConflict: 'request_id,day_of_week', ignoreDuplicates: true });
+
+    return json({ request_id: requestId, routine_id: routine.id, plan: detailed });
   } catch (error) {
     console.error(error);
-    return json({ error: error instanceof Error ? error.message : 'Error inesperado.' }, 500);
+    const message = error instanceof Error ? error.message : 'Error inesperado.';
+    if (requestId) await admin.from('fc_ai_routine_requests').update({ status: 'failed', error_message: message.slice(0, 500) }).eq('id', requestId);
+    return json({ error: message }, error instanceof HttpError ? error.status : 500);
   }
 });

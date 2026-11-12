@@ -11,7 +11,9 @@ export default function NewClientModal() {
       full_name: values.full_name.trim(),
       email: values.email.trim() || null,
       phone: values.phone.trim() || null,
-      status: values.status,
+      // Arnold V2: con correo queda 'invited' hasta que el paciente active la app.
+      status: values.email.trim() ? 'invited' : 'active',
+      birth_date: values.birth_date || null,
       goal: values.goal.trim() || null,
       height_cm: values.height_cm ? Number(values.height_cm) : null,
       notes: values.notes.trim() || null,
@@ -20,19 +22,13 @@ export default function NewClientModal() {
     try { await addClient(client); } catch (error) { toast(error.message); }
   }
   return (
-    <Modal as="form" title="Nuevo cliente" subtitle="Crear expediente sin planes de pago ni mensualidades." onSubmit={handleSubmit}>
+    <Modal as="form" title="Nuevo cliente" subtitle="Con su correo, el paciente podrá activar la app de entrenamiento." onSubmit={handleSubmit}>
       <div className="form-grid">
         <label>Nombre completo<input className="field" name="full_name" required /></label>
         <label>Correo<input className="field" name="email" type="email" /></label>
         <label>Teléfono<input className="field" name="phone" /></label>
-        <label>Estado
-          <select className="select" name="status" defaultValue="active">
-            <option value="active">Activo</option>
-            <option value="expiring">Por revisar</option>
-            <option value="paused">Pausado</option>
-          </select>
-        </label>
-        <label>Estatura (cm)<input className="field" name="height_cm" type="number" min="80" max="260" /></label>
+        <label>Fecha de nacimiento<input className="field" name="birth_date" type="date" /></label>
+        <label>Estatura (cm)<input className="field" name="height_cm" type="number" min="50" max="280" step="0.1" /></label>
         <label>Objetivo<input className="field" name="goal" placeholder="Ej. ganar fuerza" /></label>
         <label className="wide">Notas<textarea className="field" name="notes" rows="4" style={{ padding: 10 }} /></label>
       </div>

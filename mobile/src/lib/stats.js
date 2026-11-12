@@ -60,12 +60,12 @@ export function lastPerformance(logs) {
   return last;
 }
 
-// Día de la rutina que toca hoy, o el siguiente disponible.
+// Día de la rutina que toca hoy, o el siguiente disponible (días 1–7, domingo = 7).
 export function pickToday(days, now = new Date()) {
   if (!days?.length) return null;
-  const today = now.getDay();
+  const today = now.getDay() || 7;
   for (let offset = 0; offset < 7; offset += 1) {
-    const dow = (today + offset) % 7;
+    const dow = ((today - 1 + offset) % 7) + 1;
     const day = days.find((d) => d.day_of_week === dow);
     if (day) return { day, isToday: offset === 0, inDays: offset };
   }

@@ -102,8 +102,7 @@ export function FitCoachProvider({ children }) {
 
   const addClient = useCallback(async (client) => {
     if (isRemote) {
-      const created = await arnold.createClient(client, user?.id);
-      client = { ...client, id: created.id };
+      client = await arnold.createClient(client);
     } else {
       queueDraft({ type: 'client', payload: client });
     }
@@ -126,11 +125,11 @@ export function FitCoachProvider({ children }) {
   // Rutina con IA: el nutriólogo pide una propuesta, la revisa y la asigna.
   const proposeAiRoutine = useCallback(async (clientId, answers) => {
     if (!isRemote) throw new Error('Conecta Arnold V2 para generar rutinas con IA.');
-    return (await arnold.generateRoutine(clientId, answers)).plan;
+    return arnold.generateRoutine(clientId, answers);
   }, [arnold, isRemote]);
 
-  const assignAiRoutine = useCallback(async (clientId, answers, plan) => {
-    await arnold.generateRoutine(clientId, answers, plan);
+  const assignAiRoutine = useCallback(async (clientId, answers, plan, requestId) => {
+    await arnold.generateRoutine(clientId, answers, plan, requestId);
     await refresh();
     setModal(null);
     toast('Rutina con IA asignada en Arnold V2.');

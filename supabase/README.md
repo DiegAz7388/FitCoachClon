@@ -1,31 +1,44 @@
-# Supabase · FitCoach
+# Supabase · FitCoach sobre Arnold V2
 
-## 1. Migración (tablas y permisos para la app de pacientes)
+FitCoach usa las tablas, reglas (RLS) y funciones que ya tiene Arnold V2. Esta carpeta solo **agrega** lo que falta.
 
-En el panel de Supabase → **SQL Editor**, ejecuta el contenido de:
+## 1. Migración
+
+En Supabase → **SQL Editor**, abre una consulta nueva, **pega el contenido** de este archivo y presiona **Run**:
 
 ```
-migrations/20261112000000_fitcoach_mobile.sql
+migrations/20261112100000_fitcoach_app.sql
 ```
 
-Es aditiva (no borra nada) y se puede ejecutar más de una vez. Agrega:
+> Pega el texto que hay dentro del archivo, no su ruta.
 
-- `fc_clients.user_id`: vincula el expediente con la cuenta del paciente.
-- `fc_exercises`: `gif_url`, `image_url`, `equipment`, `category`, `catalog_id`.
-- `fc_routine_exercises`: `duration_seconds` (ejercicios por tiempo) y `notes`.
-- Tablas `fc_workout_sessions`, `fc_set_logs` y `fc_body_measurements`.
-- Funciones `fc_claim_client()` y `fc_current_client_id()`.
-- Políticas RLS: el paciente solo ve y registra lo suyo; el entrenador ve lo de sus pacientes.
+Es aditiva y se puede ejecutar más de una vez:
 
-> El panel web nuevo guarda `gif_url` y `duration_seconds`; aplica la migración **antes** de usarlo con datos reales.
+- `fc_exercises`: columnas `gif_url`, `image_url`, `catalog_id` y `equipment`.
+- `fc_claim_my_client()`: vincula la cuenta del paciente con su expediente. El nutriólogo lo registra con su correo (`invited`); cuando el paciente entra a la app con ese correo **confirmado**, queda vinculado y `active`.
+- `fc_my_routine()` y `fc_my_progress()`: lectura de la rutina activa y del historial del paciente.
 
-## 2. Catálogo de ejercicios con animaciones
+Funciones de Arnold V2 que usan la app y el panel: `fc_create_client`, `fc_complete_my_workout`, `fc_record_my_body_measurement`.
 
-Ejecuta `seed/exercises.sql` en el SQL Editor (1,318 ejercicios con GIF e instrucciones en español). Si cambia el catálogo del panel, regenéralo con:
+## 2. Catálogo de ejercicios (después de la migración)
 
-```bash
-node supabase/scripts/build-exercise-seed.mjs
+Ejecuta en orden, cada uno en una consulta nueva:
+
 ```
+seed/01_equipo.sql
+seed/02_ejercicios_1.sql
+seed/03_ejercicios_2.sql
+seed/04_ejercicios_3.sql
+seed/05_ejercicios_4.sql
+```
+
+Carga 1,318 ejercicios con animación e instrucciones en español, y los vincula con `fc_equipment` / `fc_exercise_equipment`. Comprobación:
+
+```sql
+select count(*), count(gif_url) from fc_exercises;   -- ambos ≥ 1318
+```
+
+Para regenerarlos si cambia el catálogo: `node supabase/scripts/build-exercise-seed.mjs`.
 
 ## 3. Rutinas con IA (OpenAI)
 
@@ -34,16 +47,30 @@ Con la [CLI de Supabase](https://supabase.com/docs/guides/cli):
 ```bash
 supabase login
 supabase link --project-ref zyqhhdaovhwxfgwocdow
-supabase secrets set OPENAI_API_KEY=sk-...        # tu clave de OpenAI (nunca en la app ni en el panel)
+supabase secrets set OPENAI_API_KEY=sk-...        # nunca en la app ni en el panel
 supabase secrets set OPENAI_MODEL=gpt-4.1-mini    # opcional
 supabase functions deploy generate-routine
 ```
 
-- Paciente (app): genera y guarda su rutina directamente.
+- Paciente (app): genera y guarda su rutina (`source = 'fito_ai'`).
 - Nutriólogo (panel → Constructor → Con IA): recibe una propuesta, la edita y la asigna.
-
-Pruebas de la lógica: `npx tsx supabase/functions/generate-routine/plan.test.ts`.
+- Cada solicitud queda en `fc_ai_routine_requests` y `fc_ai_request_days`.
 
 ## 4. Autenticación
 
-En **Authentication → Providers → Email**, deja habilitado el registro con correo. Si "Confirm email" está activo, el paciente debe confirmar su correo antes de entrar.
+- **Authentication → Providers → Email**: deja activo el registro y **Confirm email**. La vinculación exige correo confirmado para que nadie pueda reclamar el expediente de otra persona.
+- Los roles salen de `app_metadata.role` (`patient`, `trainer`, `admin`), como ya lo usa Arnold V2.
+
+## Pruebas locales
+
+`tests/arnold_v2_replica.sql` recrea el esquema de Arnold V2 (exportado del proyecto) y `tests/flujo_paciente.sql` prueba el flujo completo: alta, vinculación, rutina, entrenamiento, medidas y aislamiento entre usuarios. **No se ejecutan en Supabase.**
+
+```bash
+createdb fitcoach_test
+psql -d fitcoach_test -f supabase/tests/arnold_v2_replica.sql
+psql -d fitcoach_test -f supabase/migrations/20261112100000_fitcoach_app.sql
+for f in supabase/seed/*.sql; do psql -d fitcoach_test -f "$f"; done
+psql -d fitcoach_test -f supabase/tests/flujo_paciente.sql
+```
+
+Lógica de la función de IA: `npx tsx supabase/functions/generate-routine/plan.test.ts`.

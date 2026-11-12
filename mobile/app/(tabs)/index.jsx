@@ -6,7 +6,7 @@ import { NoClient, NoRoutine } from '../../src/components/states';
 import { Button, Card, Header, Pill, Screen, T } from '../../src/components/ui';
 import { useApp } from '../../src/lib/AppContext';
 import { estimateMinutes, pickToday, sessionsThisWeek, weekStart, weekStreak } from '../../src/lib/stats';
-import { colors, DAY_NAMES, DAY_SHORT, radius } from '../../src/lib/theme';
+import { colors, DAY_NAMES, DAY_SHORT, isoDay, radius, WEEK } from '../../src/lib/theme';
 
 function greeting() {
   const h = new Date().getHours();
@@ -20,8 +20,8 @@ export default function Today() {
   const pick = pickToday(routine?.days);
   const mondayTs = weekStart(new Date()).getTime();
   // Días de esta semana en los que realmente se entrenó (según la fecha, no el día planeado).
-  const doneThisWeek = new Set(sessions.filter((s) => s.completed_at && new Date(s.completed_at).getTime() >= mondayTs).map((s) => new Date(s.completed_at).getDay()));
-  const todayDone = pick?.isToday && doneThisWeek.has(new Date().getDay());
+  const doneThisWeek = new Set(sessions.filter((s) => s.completed_at && new Date(s.completed_at).getTime() >= mondayTs).map((s) => isoDay(s.completed_at)));
+  const todayDone = pick?.isToday && doneThisWeek.has(isoDay());
 
   return (
     <Screen refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} tintColor={colors.green} />}>
@@ -34,10 +34,10 @@ export default function Today() {
         <>
           {/* Semana */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
-            {[1, 2, 3, 4, 5, 6, 0].map((dow) => {
+            {WEEK.map((dow) => {
               const planned = routine.days.some((d) => d.day_of_week === dow);
               const done = doneThisWeek.has(dow);
-              const isToday = new Date().getDay() === dow;
+              const isToday = isoDay() === dow;
               return (
                 <View key={dow} style={{ alignItems: 'center', gap: 6 }}>
                   <Text style={{ color: isToday ? colors.text : colors.muted, fontWeight: '700', fontSize: 12 }}>{DAY_SHORT[dow]}</Text>

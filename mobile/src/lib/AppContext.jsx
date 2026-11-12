@@ -1,7 +1,7 @@
 // Sesión de Supabase + expediente, rutina e historial del paciente.
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { loadActiveRoutine, loadClient, loadMeasurements, loadSessions } from './data';
+import { loadActiveRoutine, loadClient, loadProgress } from './data';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -28,8 +28,8 @@ export function AppProvider({ children }) {
       const c = await loadClient();
       setClient(c);
       if (c) {
-        const [r, s, m] = await Promise.all([loadActiveRoutine(c.id), loadSessions(c.id), loadMeasurements(c.id)]);
-        setRoutine(r); setSessions(s); setMeasurements(m);
+        const [r, p] = await Promise.all([loadActiveRoutine(), loadProgress()]);
+        setRoutine(r); setSessions(p.sessions); setMeasurements(p.measurements);
       }
     } catch (e) {
       setError(e.message);

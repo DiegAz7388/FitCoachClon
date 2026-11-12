@@ -1,83 +1,89 @@
-// Consultas a Supabase para el paciente. Las reglas RLS limitan todo a su propio expediente.
+// Acceso a Supabase (Arnold V2) para el paciente.
+// Lecturas y escrituras pasan por funciones del servidor que solo tocan el expediente del propio paciente:
+//   fc_claim_my_client · fc_my_routine · fc_my_progress  (migración 20261112100000_fitcoach_app.sql)
+//   fc_complete_my_workout · fc_record_my_body_measurement (ya existentes en Arnold V2)
 import { supabase } from './supabase';
 import { DAY_NAMES } from './theme';
 
-async function unwrap(promise) {
-  const { data, error } = await promise;
-  if (error) throw new Error(error.message);
+async function rpc(name, params) {
+  const { data, error } = await supabase.rpc(name, params);
+  if (error) throw new Error(translate(error.message));
   return data;
 }
 
-// Vincula la cuenta con el expediente (mismo correo que registró el nutriólogo) y lo devuelve.
-export async function loadClient() {
-  const id = await unwrap(supabase.rpc('fc_claim_client'));
-  if (!id) return null;
-  return unwrap(supabase.from('fc_clients').select('id, full_name, email, goal, height_cm, status').eq('id', id).single());
+function translate(message = '') {
+  if (/Routine is not assigned/i.test(message)) return 'Esta rutina ya no está asignada a tu cuenta. Desliza hacia abajo para actualizar.';
+  if (/do not belong to this routine day/i.test(message)) return 'La rutina cambió mientras entrenabas. Actualiza e intenta de nuevo.';
+  if (/At least one completed set/i.test(message)) return 'Completa al menos una serie para guardar.';
+  if (/No active patient record/i.test(message)) return 'Tu cuenta no está vinculada a un expediente.';
+  if (/violates check constraint/i.test(message)) return 'Algún valor está fuera de rango.';
+  if (/network|fetch/i.test(message)) return 'Sin conexión. Revisa tu internet.';
+  return message;
 }
 
-export async function loadActiveRoutine(clientId) {
-  const routine = await unwrap(supabase.from('fc_routines')
-    .select(`id, name, source, session_minutes, days_per_week, created_at,
-      fc_routine_days ( day_of_week, label ),
-      fc_routine_exercises ( id, day_of_week, order_index, sets, reps_min, reps_max, rest_seconds, duration_seconds, notes,
-        exercise:fc_exercises ( id, name, muscle_group, equipment, gif_url, image_url, instructions ) )`)
-    .eq('client_id', clientId).eq('is_active', true)
-    .order('created_at', { ascending: false }).limit(1).maybeSingle());
+// Vincula la cuenta con su expediente (mismo correo, ya confirmado) y lo devuelve; null si no hay.
+export async function loadClient() {
+  return rpc('fc_claim_my_client');
+}
+
+export async function loadActiveRoutine() {
+  const routine = await rpc('fc_my_routine');
   if (!routine) return null;
-  const items = routine.fc_routine_exercises || [];
-  const days = (routine.fc_routine_days || [])
-    .map((d) => ({
+  return {
+    ...routine,
+    days: (routine.days || []).map((d) => ({
       day_of_week: d.day_of_week,
       label: d.label || DAY_NAMES[d.day_of_week],
-      exercises: items.filter((i) => i.day_of_week === d.day_of_week).sort((a, b) => a.order_index - b.order_index).map((i) => ({
-        id: i.exercise?.id ?? null,
-        name: i.exercise?.name ?? 'Ejercicio',
-        muscle_group: i.exercise?.muscle_group,
-        equipment: i.exercise?.equipment,
-        gif_url: i.exercise?.gif_url,
-        image_url: i.exercise?.image_url,
-        instructions: Array.isArray(i.exercise?.instructions) ? i.exercise.instructions : [],
-        sets: i.sets || 3,
-        reps_min: i.duration_seconds ? null : i.reps_min,
-        reps_max: i.duration_seconds ? null : i.reps_max,
-        duration_seconds: i.duration_seconds || null,
-        rest_seconds: i.rest_seconds ?? 60,
-        notes: i.notes,
+      exercises: (d.exercises || []).map((e) => ({
+        id: e.exercise_id,
+        routine_exercise_id: e.routine_exercise_id,
+        name: e.name,
+        muscle_group: e.muscle_group,
+        equipment: e.equipment,
+        gif_url: e.gif_url,
+        image_url: e.image_url,
+        instructions: Array.isArray(e.instructions) ? e.instructions : [],
+        sets: e.sets || 3,
+        reps_min: e.duration_seconds ? null : e.reps_min,
+        reps_max: e.duration_seconds ? null : e.reps_max,
+        duration_seconds: e.duration_seconds || null,
+        rest_seconds: e.rest_seconds ?? 60,
+        notes: e.notes || e.coaching_tip || null,
       })),
-    }))
-    .sort((a, b) => (a.day_of_week || 7) - (b.day_of_week || 7));
-  return { id: routine.id, name: routine.name, source: routine.source, session_minutes: routine.session_minutes, days };
+    })),
+  };
 }
 
-export async function loadSessions(clientId, sinceDays = 400) {
-  const since = new Date(Date.now() - sinceDays * 864e5).toISOString();
-  return unwrap(supabase.from('fc_workout_sessions')
-    .select('id, routine_id, day_of_week, started_at, completed_at, duration_seconds, total_volume_kg, fc_set_logs ( exercise_name, set_number, reps, weight_kg, duration_seconds, completed_at )')
-    .eq('client_id', clientId).gte('started_at', since).order('started_at', { ascending: true }));
+// Entrenamientos (con series) y medidas del paciente.
+export async function loadProgress(days = 400) {
+  const data = await rpc('fc_my_progress', { p_days: days });
+  const sessions = (data?.sessions || []).map((s) => {
+    const sets = (s.sets || []).map((l) => ({ ...l, weight_kg: l.weight_kg != null ? Number(l.weight_kg) : null }));
+    const volume = sets.reduce((sum, l) => sum + (l.weight_kg && l.reps ? l.weight_kg * l.reps : 0), 0);
+    return { ...s, sets, total_volume_kg: Math.round(volume * 10) / 10 };
+  });
+  return { sessions, measurements: data?.measurements || [] };
 }
 
-export async function saveWorkout({ clientId, routineId, dayOfWeek, state, summary }) {
-  const session = await unwrap(supabase.from('fc_workout_sessions').insert({
-    client_id: clientId, routine_id: routineId, day_of_week: dayOfWeek,
-    started_at: new Date(state.startedAt).toISOString(), completed_at: new Date(state.finishedAt || Date.now()).toISOString(),
-    duration_seconds: summary.durationSeconds, total_volume_kg: summary.volume,
-  }).select('id').single());
-  if (state.logs.length) {
-    await unwrap(supabase.from('fc_set_logs').insert(state.logs.map((l) => ({
-      session_id: session.id, exercise_id: l.exerciseId, exercise_name: l.exerciseName, set_number: l.set,
-      reps: l.reps, weight_kg: l.weight, duration_seconds: l.duration, completed_at: new Date(l.at).toISOString(),
-    }))));
-  }
-  return session.id;
+export async function saveWorkout({ routineId, dayOfWeek, state }) {
+  const sets = state.logs
+    .filter((l) => l.routineExerciseId)
+    .map((l) => ({ routine_exercise_id: l.routineExerciseId, set_number: l.set, reps_completed: l.reps, weight: l.weight }));
+  if (!sets.length) return null;
+  return rpc('fc_complete_my_workout', {
+    p_routine_id: routineId,
+    p_day_of_week: dayOfWeek,
+    p_started_at: new Date(state.startedAt).toISOString(),
+    p_completed_at: new Date(state.finishedAt || Date.now()).toISOString(),
+    p_sets: sets,
+  });
 }
 
-export async function loadMeasurements(clientId) {
-  return unwrap(supabase.from('fc_body_measurements').select('id, measured_at, weight_kg, body_fat_pct, waist_cm')
-    .eq('client_id', clientId).order('measured_at', { ascending: true }));
-}
-
-export async function addMeasurement(clientId, values) {
-  return unwrap(supabase.from('fc_body_measurements').insert({ client_id: clientId, ...values }));
+export async function addMeasurement(values) {
+  return rpc('fc_record_my_body_measurement', {
+    p_weight_kg: values.weight_kg, p_body_fat_percent: values.body_fat_percent,
+    p_muscle_mass_kg: values.muscle_mass_kg, p_waist_cm: values.waist_cm,
+  });
 }
 
 export async function generateRoutine(answers) {

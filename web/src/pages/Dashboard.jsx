@@ -5,13 +5,13 @@ import { useFitCoach } from '../state.jsx';
 
 const METRICS = [
   ['active', 'green', 'Clientes activos'],
-  ['expiring', 'amber', 'Por revisar'],
-  ['expired', 'red', 'Inactivos'],
+  ['invited', 'amber', 'Invitados sin app'],
+  ['paused', 'red', 'Pausados'],
 ];
 
 export default function Dashboard() {
   const { clients, exercises, navigate } = useFitCoach();
-  const urgent = clients.find((client) => client.status === 'expiring');
+  const urgent = clients.find((client) => client.status === 'invited');
   return (
     <Shell>
       <Topbar title="Resumen" eyebrow="Administración de FitCoach"><ConnectButton /><NewClientButton /></Topbar>
@@ -37,7 +37,7 @@ export default function Dashboard() {
         <div className="card">
           <CardHeader title="Atención del día" subtitle="Seguimiento operativo" />
           {urgent
-            ? <div className="notice"><span>●</span><div><strong>{urgent.full_name}</strong><p>Su seguimiento requiere atención. Revisa su rutina y estado desde su expediente.</p></div></div>
+            ? <div className="notice"><span>●</span><div><strong>{urgent.full_name}</strong><p>Aún no activa su cuenta en la app. Pídele que se registre con {urgent.email || 'su correo'} y lo confirme.</p></div></div>
             : <p className="muted">No hay clientes pendientes de revisión.</p>}
           <Activity title="Biblioteca disponible">{exercises.length.toLocaleString('es-MX')} ejercicios guardados localmente.</Activity>
           <Activity title="Modo sin conexión">Las consultas de ejercicios y los borradores siguen disponibles.</Activity>

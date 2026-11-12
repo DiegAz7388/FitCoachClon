@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createWorkout, workoutReducer as r, PHASE, secondsLeft, summary, upNext, targetLabel, formatClock, progress } from '../src/lib/workout.js';
 
-const squat = { id: 1, name: 'Sentadilla', sets: 2, reps_min: 8, reps_max: 12, rest_seconds: 60 };
+const squat = { id: 1, routine_exercise_id: 101, name: 'Sentadilla', sets: 2, reps_min: 8, reps_max: 12, rest_seconds: 60 };
 const plank = { id: 2, name: 'Plancha', sets: 2, duration_seconds: 30, rest_seconds: 20 };
 const T = 1_000_000;
 
@@ -13,6 +13,7 @@ test('series con repeticiones y descanso automático', () => {
   assert.equal(targetLabel(squat), '8–12 reps');
   s = r(s, { type: 'COMPLETE_SET', reps: 10, weight: 40, now: T + 30_000 });
   assert.equal(s.phase, PHASE.REST);
+  assert.equal(s.logs[0].routineExerciseId, 101, 'guarda el id del ejercicio de la rutina');
   assert.equal(secondsLeft(s.restEndsAt, T + 30_000), 60);
   assert.deepEqual(upNext(s), { exercise: squat, set: 2 });
   s = r(s, { type: 'TICK', now: T + 60_000 });
