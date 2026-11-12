@@ -73,3 +73,18 @@ h3 { margin: 0; font-size: 15px; }
 
 @media (max-width: 980px) { .app-shell { grid-template-columns: 1fr; }.sidebar { z-index: 10; position: sticky; height: auto; top: 0; padding: 12px 15px; flex-direction: row; align-items: center; gap: 12px; overflow-x: auto; }.brand { min-width: max-content; }.nav { display: flex; gap: 4px; }.nav button { width: auto; min-width: max-content; padding: 8px 10px; }.sidebar-footer { margin: 0 0 0 auto; display: flex; }.connection { display: none; }.main { padding: 24px 20px 45px; }.grid-metrics { grid-template-columns: repeat(2, 1fr); }.content-grid, .detail-columns { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .topbar { align-items: flex-start; flex-direction: column; }.top-actions { width: 100%; }.grid-metrics { grid-template-columns: 1fr 1fr; gap: 10px; }.metric { padding: 14px; }.metric-value { font-size: 25px; }.form-grid, .builder-layout { grid-template-columns: 1fr; }.form-grid .wide { grid-column: auto; }.main { padding: 19px 14px 35px; }.card { padding: 15px; }.sidebar-footer { display: none; }.nav button::before { display: none; } }
+
+/* Constructor: configuración por ejercicio y rutina con IA */
+@media (min-width: 621px) { .builder-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); } }
+.builder-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.builder-tabs button { border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); border-radius: 999px; padding: 7px 14px; font-weight: 700; cursor: pointer; }
+.builder-tabs button.active { background: var(--green); border-color: var(--green); color: #0b1a0f; }
+.selected-exercise { flex-wrap: wrap; }
+.selected-exercise .exercise-thumb { width: 38px; height: 38px; border-radius: 8px; background: #fff; object-fit: contain; flex: 0 0 auto; }
+.set-config { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; align-items: flex-end; }
+.set-config label { display: flex; flex-direction: column; gap: 3px; font-size: 10px; color: var(--muted); font-weight: 700; }
+.set-config input, .set-config select { min-height: 30px; width: 62px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-3); color: var(--text); padding: 0 6px; }
+.set-config select { width: 84px; }
+.ai-day { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 10px; }
+.ai-day h3 { margin: 0 0 8px; }
+.ai-summary { color: var(--muted); font-size: 13px; margin: 6px 0 0; }

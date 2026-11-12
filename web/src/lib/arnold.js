@@ -1,7 +1,9 @@
 // Acceso a Arnold V2 (Supabase REST + Auth) con la publishable key y la sesión del usuario.
 // Mismas tablas y consultas que la versión anterior del panel.
 import { config } from '../config.js';
-import { dayName } from './format.js';
+import { dayName, EXERCISE_MEDIA_BASE } from './format.js';
+
+const mediaUrl = (path) => (/^https?:/.test(path) ? path : EXERCISE_MEDIA_BASE + path);
 
 const SESSION_KEY = 'fitcoach-arnold-v2-session';
 
@@ -40,7 +42,7 @@ export function createArnoldClient(getSession) {
       const ids = routines.map((routine) => routine.id).join(',');
       const [days, exercises] = await Promise.all([
         api(`/rest/v1/fc_routine_days?select=routine_id,day_of_week,label&routine_id=in.(${ids})&order=day_of_week.asc`),
-        api(`/rest/v1/fc_routine_exercises?select=routine_id,day_of_week,order_index,sets,reps_min,reps_max,exercise:fc_exercises(id,name,muscle_group)&routine_id=in.(${ids})&order=order_index.asc`),
+        api(`/rest/v1/fc_routine_exercises?select=routine_id,day_of_week,order_index,sets,reps_min,reps_max,rest_seconds,duration_seconds,exercise:fc_exercises(id,name,muscle_group,gif_url)&routine_id=in.(${ids})&order=order_index.asc`),
       ]);
       routines.forEach((routine) => {
         routine.days = days.filter((day) => String(day.routine_id) === String(routine.id)).map((day) => ({
@@ -52,8 +54,11 @@ export function createArnoldClient(getSession) {
               id: item.exercise?.id,
               name: item.exercise?.name || 'Ejercicio',
               muscle_group: item.exercise?.muscle_group,
+              gif_url: item.exercise?.gif_url,
               sets: item.sets,
               reps: item.reps_min === item.reps_max ? String(item.reps_min) : `${item.reps_min}-${item.reps_max}`,
+              duration_seconds: item.duration_seconds,
+              rest_seconds: item.rest_seconds,
             })),
         }));
       });
@@ -99,6 +104,11 @@ export function createArnoldClient(getSession) {
           instructions: exercise.instruction_steps?.es || [],
           coaching_tip: exercise.equipment ? `Equipo: ${exercise.equipment}` : null,
           is_active: true,
+          catalog_id: exercise.catalog_id || (typeof exercise.id === 'string' && /^\d+$/.test(exercise.id) ? exercise.id : null),
+          gif_url: exercise.gif_url ? mediaUrl(exercise.gif_url) : null,
+          image_url: exercise.image ? mediaUrl(exercise.image) : null,
+          equipment: exercise.equipment || null,
+          category: exercise.category || null,
         }),
       });
       lookup.set(String(exercise.id), saved.id);
@@ -107,13 +117,33 @@ export function createArnoldClient(getSession) {
       method: 'POST',
       body: JSON.stringify(routine.days.flatMap((day) => day.exercises.map((exercise, index) => ({
         routine_id: created.id, exercise_id: lookup.get(String(exercise.id)), day_of_week: day.day,
-        order_index: index + 1, sets: exercise.sets || 3, reps_min: 10, reps_max: 12, rest_seconds: 90,
+        order_index: index + 1,
+        // Configuración por ejercicio del constructor (antes fija en 3 × 10-12, 90 s).
+        sets: exercise.cfg?.sets || 3,
+        reps_min: exercise.cfg?.mode === 'time' ? 1 : exercise.cfg?.reps_min || 10,
+        reps_max: exercise.cfg?.mode === 'time' ? 1 : exercise.cfg?.reps_max || exercise.cfg?.reps_min || 12,
+        duration_seconds: exercise.cfg?.mode === 'time' ? exercise.cfg.duration_seconds || 30 : null,
+        rest_seconds: exercise.cfg?.rest_seconds ?? 60,
       })))),
     });
     return created.id;
   }
 
-  return { api, loadRemoteData, createClient, createRoutine };
+  // Rutina con IA (Edge Function generate-routine). Sin `plan` pide una propuesta;
+  // con `plan` guarda la propuesta revisada por el nutriólogo.
+  async function generateRoutine(clientId, answers, plan) {
+    const session = getSession();
+    const response = await fetch(`${config.supabaseUrl}/functions/v1/generate-routine`, {
+      method: 'POST',
+      headers: { apikey: config.supabasePublishableKey, Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: Number(clientId), answers, plan, save: Boolean(plan) }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `Error ${response.status} al generar la rutina.`);
+    return result;
+  }
+
+  return { api, loadRemoteData, createClient, createRoutine, generateRoutine };
 }
 
 export async function signInWithPassword(email, password) {

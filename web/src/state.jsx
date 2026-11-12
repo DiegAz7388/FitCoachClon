@@ -123,6 +123,19 @@ export function FitCoachProvider({ children }) {
     toast(isRemote ? 'Rutina guardada en Arnold V2.' : 'Rutina guardada como borrador local.');
   }, [arnold, isRemote, toast, user]);
 
+  // Rutina con IA: el nutriólogo pide una propuesta, la revisa y la asigna.
+  const proposeAiRoutine = useCallback(async (clientId, answers) => {
+    if (!isRemote) throw new Error('Conecta Arnold V2 para generar rutinas con IA.');
+    return (await arnold.generateRoutine(clientId, answers)).plan;
+  }, [arnold, isRemote]);
+
+  const assignAiRoutine = useCallback(async (clientId, answers, plan) => {
+    await arnold.generateRoutine(clientId, answers, plan);
+    await refresh();
+    setModal(null);
+    toast('Rutina con IA asignada en Arnold V2.');
+  }, [arnold, refresh, toast]);
+
   const navigate = useCallback((nextView, filter = 'all') => {
     setView(nextView);
     setClientFilter(filter);
@@ -134,7 +147,7 @@ export function FitCoachProvider({ children }) {
     online, isConfigured, isRemote, user,
     modal, openModal: setModal, closeModal: () => setModal(null),
     toastMessage, toast,
-    connect, signIn, signOut, addClient, addRoutine,
+    connect, signIn, signOut, addClient, addRoutine, proposeAiRoutine, assignAiRoutine,
   };
 
   return <FitCoachContext.Provider value={value}>{children}</FitCoachContext.Provider>;

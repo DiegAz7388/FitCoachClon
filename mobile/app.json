@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "FitCoach",
+    "slug": "fitcoach",
+    "scheme": "fitcoach",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#09110c",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": false, "bundleIdentifier": "mx.fitcoach.app" },
+    "android": { "package": "mx.fitcoach.app", "edgeToEdgeEnabled": true },
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": false }
+  }
+}
