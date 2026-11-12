@@ -1,0 +1,9 @@
+# Configuración mínima para la CLI de Supabase (link, secrets, functions deploy).
+# El proyecto remoto se elige con: npx supabase link --project-ref zyqhhdaovhwxfgwocdow
+project_id = "fitcoach"
+
+[functions.generate-routine]
+enabled = true
+# Exige un usuario con sesión iniciada (JWT); la función valida además el rol.
+verify_jwt = true
+entrypoint = "./functions/generate-routine/index.ts"
