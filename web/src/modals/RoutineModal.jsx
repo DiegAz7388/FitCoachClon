@@ -63,7 +63,7 @@ export default function RoutineModal({ clientId = '' }) {
         </label>
       </div>
       {tab === 'manual' ? <ManualBuilder clientId={client} /> : isRemote ? <AiBuilder clientId={client} /> : (
-        <div className="status-banner warn">Conecta Arnold V2 para generar rutinas con IA. La generación se hace en el servidor con la clave de OpenAI.</div>
+        <div className="status-banner warn">Conecta Arnold V2 para generar rutinas con IA. La generación se hace en el servidor; la clave de la IA nunca está en el panel.</div>
       )}
     </Modal>
   );

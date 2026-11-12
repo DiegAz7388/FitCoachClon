@@ -40,17 +40,22 @@ select count(*), count(gif_url) from fc_exercises;   -- ambos ≥ 1318
 
 Para regenerarlos si cambia el catálogo: `node supabase/scripts/build-exercise-seed.mjs`.
 
-## 3. Rutinas con IA (OpenAI)
+## 3. Rutinas con IA (Google Gemini)
 
-Con la [CLI de Supabase](https://supabase.com/docs/guides/cli):
+Crea una clave gratuita en [Google AI Studio](https://aistudio.google.com/apikey) y, desde la carpeta del proyecto en tu computadora:
 
 ```bash
-supabase login
-supabase link --project-ref zyqhhdaovhwxfgwocdow
-supabase secrets set OPENAI_API_KEY=sk-...        # nunca en la app ni en el panel
-supabase secrets set OPENAI_MODEL=gpt-4.1-mini    # opcional
-supabase functions deploy generate-routine
+npx supabase login
+npx supabase link --project-ref zyqhhdaovhwxfgwocdow
+npx supabase secrets set GEMINI_API_KEY=tu-clave-de-gemini    # nunca en la app, el panel ni el chat
+npx supabase functions deploy generate-routine
 ```
+
+- Modelo por defecto: `gemini-2.5-flash`. Para usar otro: `npx supabase secrets set GEMINI_MODEL=gemini-3.8-flash`.
+- El nivel gratuito tiene límite de solicitudes por minuto y por día; si se alcanza, la app muestra un aviso para intentar más tarde.
+- Si algún día prefieren OpenAI: configura `OPENAI_API_KEY` en lugar de `GEMINI_API_KEY`.
+
+Uso:
 
 - Paciente (app): genera y guarda su rutina (`source = 'fito_ai'`).
 - Nutriólogo (panel → Constructor → Con IA): recibe una propuesta, la edita y la asigna.
@@ -73,4 +78,4 @@ for f in supabase/seed/*.sql; do psql -d fitcoach_test -f "$f"; done
 psql -d fitcoach_test -f supabase/tests/flujo_paciente.sql
 ```
 
-Lógica de la función de IA: `npx tsx supabase/functions/generate-routine/plan.test.ts`.
+Lógica de la función de IA: `npx tsx supabase/functions/generate-routine/plan.test.ts` y `ai.test.ts`.

@@ -1,4 +1,4 @@
-// Cuestionario estilo Gravl → la Edge Function genera y guarda la rutina con OpenAI.
+// Cuestionario estilo Gravl → la Edge Function genera y guarda la rutina con IA (Gemini u OpenAI).
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';

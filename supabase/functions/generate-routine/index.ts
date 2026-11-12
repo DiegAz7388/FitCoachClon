@@ -1,4 +1,4 @@
-// Edge Function: genera una rutina con OpenAI usando el catálogo fc_exercises (esquema Arnold V2).
+// Edge Function: genera una rutina con IA (Gemini u OpenAI) usando el catálogo fc_exercises (esquema Arnold V2).
 //
 // POST /functions/v1/generate-routine   (Authorization: Bearer <JWT del usuario>)
 //   Paciente (app):  { answers }                              → genera y guarda su rutina.
@@ -6,10 +6,11 @@
 //                       { client_id, answers, plan, request_id } → guarda la propuesta revisada, sin volver a llamar a OpenAI.
 // Cada solicitud queda registrada en fc_ai_routine_requests (+ fc_ai_request_days).
 //
-// Secretos: OPENAI_API_KEY (obligatorio), OPENAI_MODEL (opcional).
+// Secretos: GEMINI_API_KEY (u OPENAI_API_KEY) y opcionalmente GEMINI_MODEL / OPENAI_MODEL (ver ai.ts).
 // SUPABASE_URL, SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY los pone Supabase automáticamente.
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { buildPrompt, type Candidate, normalizeAnswers, PLAN_SCHEMA, type Plan, sanitizePlan, selectCandidates } from './plan.ts';
+import { AiError, generatePlanWithAI } from './ai.ts';
+import { buildPrompt, type Candidate, normalizeAnswers, type Plan, sanitizePlan, selectCandidates } from './plan.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -26,26 +27,6 @@ async function canWriteClient(admin: SupabaseClient, userId: string, role: strin
   if (role === 'admin' || client.primary_trainer_id === userId) return true;
   const { data: staff } = await admin.from('fc_client_staff').select('access_level').eq('client_id', clientId).eq('staff_user_id', userId).maybeSingle();
   return staff?.access_level === 'coach';
-}
-
-async function askOpenAI(system: string, prompt: string): Promise<Plan> {
-  const apiKey = Deno.env.get('OPENAI_API_KEY');
-  if (!apiKey) throw new HttpError(500, 'Falta configurar OPENAI_API_KEY en los secretos de Supabase.');
-  const ai = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini',
-      messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
-      response_format: { type: 'json_schema', json_schema: { name: 'rutina', strict: true, schema: PLAN_SCHEMA } },
-    }),
-  });
-  if (!ai.ok) {
-    console.error('OpenAI', ai.status, await ai.text());
-    throw new HttpError(502, 'El servicio de IA no respondió. Intenta de nuevo en unos minutos.');
-  }
-  const completion = await ai.json();
-  return JSON.parse(completion.choices[0].message.content) as Plan;
 }
 
 Deno.serve(async (request) => {
@@ -110,7 +91,7 @@ Deno.serve(async (request) => {
     } else {
       candidates = selectCandidates(all, answers);
       const { system, user: prompt } = buildPrompt(answers, candidates, client?.goal);
-      plan = sanitizePlan(await askOpenAI(system, prompt), answers, candidates);
+      plan = sanitizePlan(await generatePlanWithAI(system, prompt, (name) => Deno.env.get(name)), answers, candidates);
     }
 
     const byId = new Map(candidates.map((e) => [e.id, e]));
@@ -147,6 +128,6 @@ Deno.serve(async (request) => {
     console.error(error);
     const message = error instanceof Error ? error.message : 'Error inesperado.';
     if (requestId) await admin.from('fc_ai_routine_requests').update({ status: 'failed', error_message: message.slice(0, 500) }).eq('id', requestId);
-    return json({ error: message }, error instanceof HttpError ? error.status : 500);
+    return json({ error: message }, error instanceof HttpError || error instanceof AiError ? error.status : 500);
   }
 });
