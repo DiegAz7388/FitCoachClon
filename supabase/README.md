@@ -51,7 +51,7 @@ npx supabase secrets set GEMINI_API_KEY=tu-clave-de-gemini    # nunca en la app,
 npx supabase functions deploy generate-routine
 ```
 
-- Modelo por defecto: `gemini-2.5-flash`. Para usar otro: `npx supabase secrets set GEMINI_MODEL=gemini-3.8-flash`.
+- Modelo: la función consulta a Google qué modelos tiene tu clave y usa el **Flash estable más reciente**. Si Google retira uno, cambia solo al siguiente. Para fijar uno en particular, crea el secreto `GEMINI_MODEL` (si ese modelo deja de existir, también cambia solo).
 - El nivel gratuito tiene límite de solicitudes por minuto y por día; si se alcanza, la app muestra un aviso para intentar más tarde.
 - Si algún día prefieren OpenAI: configura `OPENAI_API_KEY` en lugar de `GEMINI_API_KEY`.
 

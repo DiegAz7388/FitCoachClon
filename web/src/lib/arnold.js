@@ -33,7 +33,7 @@ export function createArnoldClient(getSession) {
   async function loadRemoteData() {
     const [clients, routineRows] = await Promise.all([
       api('/rest/v1/fc_clients?select=*&status=neq.archived&order=created_at.desc'),
-      api('/rest/v1/fc_routines?select=id,client_id,name,source,session_minutes,days_per_week,is_active,created_at&client_id=not.is.null&archived_at=is.null&or=(is_active.is.null,is_active.eq.true)&order=created_at.desc'),
+      api('/rest/v1/fc_routines?select=id,client_id,name,source,session_minutes,days_per_week,created_at&client_id=not.is.null&archived_at=is.null&order=created_at.desc'),
     ]);
     const routines = routineRows.map((routine) => ({ ...routine, days: [] }));
     if (routines.length) {
@@ -89,9 +89,10 @@ export function createArnoldClient(getSession) {
   async function createRoutine(routine, userId) {
     const exercises = routine.days.flatMap((day) => day.exercises);
     const ids = await findExerciseIds(exercises);
-    // La rutina nueva reemplaza a la activa del cliente.
-    await api(`/rest/v1/fc_routines?client_id=eq.${Number(routine.client_id)}&archived_at=is.null&or=(is_active.is.null,is_active.eq.true)`, {
-      method: 'PATCH', body: JSON.stringify({ is_active: false }),
+    // La rutina nueva reemplaza a la activa: la anterior se archiva.
+    // (is_active es una columna generada en Arnold V2; no se puede escribir.)
+    await api(`/rest/v1/fc_routines?client_id=eq.${Number(routine.client_id)}&archived_at=is.null`, {
+      method: 'PATCH', body: JSON.stringify({ archived_at: new Date().toISOString() }),
     });
     const [created] = await api('/rest/v1/fc_routines', {
       method: 'POST',
@@ -99,7 +100,7 @@ export function createArnoldClient(getSession) {
       body: JSON.stringify({
         client_id: Number(routine.client_id), created_by: userId, name: routine.name, source: 'trainer',
         experience_level: 'beginner', training_location: 'gym', focus_mode: 'balanced', priority_muscles: [],
-        session_minutes: routine.session_minutes, days_per_week: routine.days.length, is_active: true,
+        session_minutes: routine.session_minutes, days_per_week: routine.days.length,
       }),
     });
     await api('/rest/v1/fc_routine_days', {

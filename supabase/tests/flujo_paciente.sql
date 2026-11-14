@@ -13,8 +13,15 @@ set role authenticated;
 select pg_temp.como('11111111-1111-1111-1111-111111111111');
 select 'Ana creada: ' || (fc_create_client('Ana García', ' ana@mail.com ', null, 'Bajar grasa', 160)).status;
 select 'Beto creado: ' || (fc_create_client('Beto Ruiz', 'beto@mail.com')).status;
-insert into fc_routines (client_id, created_by, name, source, experience_level, training_location, focus_mode, priority_muscles, session_minutes, days_per_week, is_active)
-  select id, '11111111-1111-1111-1111-111111111111', 'Fuerza base', 'trainer', 'beginner', 'gym', 'balanced', '{}', 45, 2, true from fc_clients where full_name = 'Ana García';
+insert into fc_routines (client_id, created_by, name, source, experience_level, training_location, focus_mode, priority_muscles, session_minutes, days_per_week)
+  select id, '11111111-1111-1111-1111-111111111111', 'Rutina vieja', 'trainer', 'beginner', 'gym', 'balanced', '{}', 30, 1 from fc_clients where full_name = 'Ana García';
+\echo '--- debe FALLAR (columna generada, error del panel anterior): update is_active'
+update fc_routines set is_active = false where name = 'Rutina vieja';
+\echo '== Como el panel/función corregidos: archivar la anterior y crear la nueva'
+update fc_routines set archived_at = now(), updated_at = now() where client_id = (select id from fc_clients where full_name = 'Ana García') and archived_at is null;
+insert into fc_routines (client_id, created_by, name, source, experience_level, training_location, focus_mode, priority_muscles, session_minutes, days_per_week)
+  select id, '11111111-1111-1111-1111-111111111111', 'Fuerza base', 'trainer', 'beginner', 'gym', 'balanced', '{}', 45, 2 from fc_clients where full_name = 'Ana García';
+select 'rutinas: ' || string_agg(name || ' activa=' || is_active, ', ' order by id) from fc_routines;
 insert into fc_routine_days select r.id, d, l from fc_routines r, (values (1, 'Lunes'), (7, 'Domingo')) v(d, l) where r.name = 'Fuerza base';
 insert into fc_routine_exercises (routine_id, exercise_id, day_of_week, order_index, sets, reps_min, reps_max, duration_seconds, rest_seconds)
   select r.id, e.id, v.d, v.o, 3, v.rmin, v.rmax, v.dur, 60 from fc_routines r,

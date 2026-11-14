@@ -61,7 +61,7 @@ returns jsonb language sql stable security definer set search_path = '' as $$
     select c.id from public.fc_clients c where c.user_id = (select auth.uid()) and c.status <> 'archived' limit 1
   ), r as (
     select r.* from public.fc_routines r join me on r.client_id = me.id
-     where r.archived_at is null and r.is_active is not false
+     where r.archived_at is null
      order by r.created_at desc limit 1
   ), days as (
     select r.id as routine_id, x.day_of_week, d.label

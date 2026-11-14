@@ -88,3 +88,15 @@ h3 { margin: 0; font-size: 15px; }
 .ai-day { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-top: 10px; }
 .ai-day h3 { margin: 0 0 8px; }
 .ai-summary { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+
+/* Constructor: selección de días con botones */
+.day-picker { margin-top: 16px; }
+.day-picker-label { display: block; color: var(--muted); font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.day-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.day-chip { position: relative; min-width: 58px; height: 42px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-weight: 800; cursor: pointer; }
+.day-chip:hover { border-color: var(--green); }
+.day-chip.done { border-color: var(--green); color: var(--green); }
+.day-chip.active { background: var(--green); border-color: var(--green); color: #0b1a0f; }
+.day-chip small { position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: var(--amber); color: #1b1404; font-size: 11px; line-height: 18px; text-align: center; }
+.day-hint { margin: 8px 0 0; font-size: 13px; }
+.day-summary { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }

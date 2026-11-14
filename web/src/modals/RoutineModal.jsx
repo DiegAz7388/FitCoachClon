@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Modal } from '../components/common.jsx';
+import { emptyPlanner, finalize, setDraft, summarize, toggleDay } from '../lib/dayPlanner.js';
 import { EXERCISE_MEDIA_BASE } from '../lib/format.js';
 import { useFitCoach } from '../state.jsx';
 
@@ -72,8 +73,10 @@ export default function RoutineModal({ clientId = '' }) {
 function ManualBuilder({ clientId }) {
   const { exercises, addRoutine, closeModal, toast } = useFitCoach();
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState([]);
+  const [planner, setPlanner] = useState(emptyPlanner);
   const [saving, setSaving] = useState(false);
+  const selected = planner.draft;
+  const groups = summarize(planner);
 
   const results = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -82,6 +85,7 @@ function ManualBuilder({ clientId }) {
       .slice(0, 18);
   }, [exercises, search]);
 
+  const setSelected = (updater) => setPlanner((current) => setDraft(current, updater));
   const add = (exercise) => setSelected((current) => (current.some((item) => String(item.id) === String(exercise.id)) ? current : [...current, { ...exercise, cfg: defaultConfig(exercise) }]));
   const remove = (index) => setSelected((current) => current.filter((_, i) => i !== index));
   const updateCfg = (index, cfg) => setSelected((current) => current.map((item, i) => (i === index ? { ...item, cfg } : item)));
@@ -94,25 +98,27 @@ function ManualBuilder({ clientId }) {
 
   async function handleSubmit(event) {
     event.preventDefault();
-    if (!selected.length) { toast('Agrega al menos un ejercicio.'); return; }
-    const form = event.currentTarget;
-    const days = [...form.elements.days.selectedOptions].map((option) => Number(option.value));
-    if (!days.length) { toast('Elige al menos un día.'); return; }
-    const exercisesWithCfg = selected.map((exercise) => {
+    if (selected.length && !planner.active.length) { toast('Elige los días para los ejercicios de la lista.'); return; }
+    const days = finalize(planner);
+    if (!days.length) { toast('Elige al menos un día y agrégale ejercicios.'); return; }
+    const normalize = (exercise) => {
       const cfg = { ...exercise.cfg, sets: exercise.cfg.sets || 3, rest_seconds: exercise.cfg.rest_seconds === '' ? 60 : exercise.cfg.rest_seconds };
       if (cfg.mode === 'reps') { cfg.reps_min = cfg.reps_min || 10; cfg.reps_max = Math.max(cfg.reps_min, cfg.reps_max || cfg.reps_min); }
       return { ...exercise, cfg, sets: cfg.sets, reps: cfg.mode === 'time' ? `${cfg.duration_seconds} s` : cfg.reps_min === cfg.reps_max ? String(cfg.reps_min) : `${cfg.reps_min}-${cfg.reps_max}` };
-    });
+    };
+    const form = event.currentTarget;
     const routine = {
       id: `local-routine-${Date.now()}`,
       client_id: clientId,
       name: form.elements.name.value.trim(),
       session_minutes: Number(form.elements.session_minutes.value),
-      days: days.map((day) => ({ day, exercises: exercisesWithCfg })),
+      days: days.map(({ day, exercises: list }) => ({ day, exercises: list.map(normalize) })),
     };
     setSaving(true);
     try { await addRoutine(routine); } catch (error) { toast(error.message); } finally { setSaving(false); }
   }
+
+  const activeLabel = planner.active.length ? joinDays(planner.active) : '';
 
   return (
     <form onSubmit={handleSubmit}>
@@ -126,12 +132,38 @@ function ManualBuilder({ clientId }) {
             <option value="90">90 min</option>
           </select>
         </label>
-        <label>Días
-          <select className="select" name="days" multiple size="4" defaultValue={['1', '3', '5']}>
-            {DAY_OPTIONS.map(([value, label]) => <option key={value} value={String(value)}>{label}</option>)}
-          </select>
-        </label>
       </div>
+
+      <div className="day-picker">
+        <span className="day-picker-label">Días</span>
+        <div className="day-chips" role="group" aria-label="Días de entrenamiento">
+          {DAY_OPTIONS.map(([value, label]) => {
+            const active = planner.active.includes(value);
+            const count = planner.plan[value]?.length;
+            return (
+              <button type="button" key={value} aria-pressed={active}
+                className={`day-chip${active ? ' active' : ''}${count ? ' done' : ''}`}
+                onClick={() => setPlanner((current) => toggleDay(current, value))}>
+                {label.slice(0, 3)}
+                {count ? <small>{count}</small> : null}
+              </button>
+            );
+          })}
+        </div>
+        <p className="muted day-hint">
+          {planner.active.length
+            ? selected.length
+              ? `Editando ${activeLabel}. Al elegir otro día, estos ejercicios se guardan y la lista queda limpia.`
+              : `Agrega los ejercicios para ${activeLabel}. Puedes elegir más días para que compartan los mismos ejercicios.`
+            : 'Elige uno o más días y luego agrega sus ejercicios.'}
+        </p>
+        {groups.length ? (
+          <div className="day-summary">
+            {groups.map((group) => <span key={group.days.join()} className="pill active">{joinDays(group.days)} · {group.count} ejercicio{group.count === 1 ? '' : 's'}</span>)}
+          </div>
+        ) : null}
+      </div>
+
       <div className="builder-layout" style={{ marginTop: 17 }}>
         <div>
           <input className="field" placeholder="Buscar ejercicio para agregar..." value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -145,7 +177,7 @@ function ManualBuilder({ clientId }) {
           </div>
         </div>
         <div>
-          <h3>Ejercicios seleccionados</h3>
+          <h3>{activeLabel ? `Ejercicios de ${activeLabel}` : 'Ejercicios seleccionados'}</h3>
           <div className="selected-exercises">
             {selected.map((exercise, index) => (
               <div className="selected-exercise" key={exercise.id}>
@@ -157,7 +189,7 @@ function ManualBuilder({ clientId }) {
                 <SetConfig cfg={exercise.cfg} onChange={(cfg) => updateCfg(index, cfg)} />
               </div>
             ))}
-            {!selected.length && <p className="muted">Aún no agregas ejercicios.</p>}
+            {!selected.length && <p className="muted">Aún no agregas ejercicios{activeLabel ? ` para ${activeLabel}` : ''}.</p>}
           </div>
         </div>
       </div>
@@ -167,6 +199,12 @@ function ManualBuilder({ clientId }) {
       </div>
     </form>
   );
+}
+
+// "Lunes", "Lunes y Miércoles", "Lunes, Miércoles y Viernes"
+function joinDays(days) {
+  const names = days.map((d) => DAY_OPTIONS.find(([v]) => v === d)?.[1]);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} y ${names.at(-1)}` : names[0];
 }
 
 // Propuesta de la IA → revisión por día → asignación.

@@ -103,13 +103,16 @@ Deno.serve(async (request) => {
     }
 
     // Guardar: la nueva rutina reemplaza a la activa del paciente.
-    await admin.from('fc_routines').update({ is_active: false, updated_at: new Date().toISOString() })
-      .eq('client_id', clientId).is('archived_at', null).or('is_active.is.null,is_active.eq.true'); // neq excluiría los NULL
+    // La anterior se archiva (is_active es una columna generada en Arnold V2; no se puede escribir).
+    const now = new Date().toISOString();
+    const { error: archiveError } = await admin.from('fc_routines').update({ archived_at: now, updated_at: now })
+      .eq('client_id', clientId).is('archived_at', null);
+    if (archiveError) throw archiveError;
     const { data: routine, error: routineError } = await admin.from('fc_routines').insert({
       client_id: clientId, created_by: user.id, name: plan.name, source: 'fito_ai', goal: answers.goal,
       experience_level: answers.experience_level, training_location: answers.training_location,
       focus_mode: answers.priority_muscles?.length ? 'focused' : 'balanced', priority_muscles: answers.priority_muscles ?? [],
-      session_minutes: answers.session_minutes, days_per_week: plan.days.length, is_active: true,
+      session_minutes: answers.session_minutes, days_per_week: plan.days.length,
     }).select('id').single();
     if (routineError) throw routineError;
     const { error: daysError } = await admin.from('fc_routine_days').insert(plan.days.map((d) => ({ routine_id: routine.id, day_of_week: d.day_of_week, label: d.label })));
