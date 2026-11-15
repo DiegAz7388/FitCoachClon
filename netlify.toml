@@ -1,0 +1,9 @@
+# Publicación del panel web en Netlify (plan gratuito, se permite uso comercial).
+# Netlify construye la carpeta web/ y publica web/dist.
+[build]
+  base = "web"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
