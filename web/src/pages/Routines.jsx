@@ -13,7 +13,7 @@ export default function Routines() {
       </Topbar>
       <section className="content-grid">
         <div className="card">
-          <CardHeader title="Rutinas activas" subtitle="Asignadas a clientes y guardadas en Arnold V2 cuando hay conexión." />
+          <CardHeader title="Rutinas activas" subtitle="Una rutina activa por paciente; al asignar otra, la anterior se archiva." />
           <div className="list">
             {routines.map((routine) => {
               const client = clients.find((item) => String(item.id) === String(routine.client_id));
@@ -23,7 +23,7 @@ export default function Routines() {
                   <span className="initials">⌁</span>
                   <span className="row-content">
                     <strong>{routine.name}</strong>
-                    <p>{client?.full_name || 'Cliente sin asignar'} · {routine.days.length || routine.days_per_week || 0} días · {exerciseCount} ejercicios</p>
+                    <p>{client?.full_name || 'Paciente sin asignar'} · {routine.days.length || routine.days_per_week || 0} días · {exerciseCount} ejercicios</p>
                   </span>
                   <span className="pill active">Activa</span>
                 </button>
@@ -34,7 +34,7 @@ export default function Routines() {
         </div>
         <div className="card">
           <CardHeader title="Constructor" subtitle="Usa el catálogo local, incluso cuando no hay conexión." />
-          <p className="muted">Selecciona un cliente, define los días y agrega ejercicios. Si Arnold V2 no está disponible, se conservará un borrador local para sincronizar después.</p>
+          <p className="muted">Elige un paciente, selecciona los días y agrega sus ejercicios, o pide una propuesta a la IA y ajústala antes de asignarla.</p>
           <button className="button primary" onClick={openBuilder}>Abrir constructor</button>
         </div>
       </section>

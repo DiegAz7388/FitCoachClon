@@ -36,7 +36,8 @@ export function normalizeAnswers(raw: Partial<Answers>): Answers {
 }
 
 // Reduce el catálogo a una lista manejable para el modelo, equilibrada por músculo.
-export function selectCandidates(all: Candidate[], answers: Answers, perMuscle = 14, random = Math.random): Candidate[] {
+// 8 por músculo (16 si es prioritario): suficiente variedad y un prompt corto para que la IA responda rápido.
+export function selectCandidates(all: Candidate[], answers: Answers, perMuscle = 8, random = Math.random): Candidate[] {
   const allowed = all.filter((e) => answers.training_location !== 'home' || HOME_EQUIPMENT.has(e.equipment ?? 'body weight'));
   const groups = new Map<string, Candidate[]>();
   for (const exercise of allowed) {

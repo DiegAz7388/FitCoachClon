@@ -7,7 +7,7 @@ export default function Progress() {
   const { clients, routines, exercises } = useFitCoach();
   return (
     <Shell>
-      <Topbar title="Progreso" eyebrow="Seguimiento de clientes" />
+      <Topbar title="Progreso" eyebrow="Seguimiento de pacientes" />
       <section className="content-grid">
         <div className="card">
           <CardHeader title="Actividad reciente" subtitle="Resumen operativo de entrenamiento." />

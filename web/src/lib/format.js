@@ -4,7 +4,7 @@ export function initials(name = '') {
   return name.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'FC';
 }
 
-// Estados de fc_clients en Arnold V2.
+// Estados de fc_clients.
 export function textStatus(status) {
   return ({ active: 'Activo', invited: 'Invitado', paused: 'Pausado', archived: 'Archivado' }[status] || status);
 }
@@ -13,7 +13,7 @@ export function statusClass(status) {
   return status === 'active' ? 'active' : status === 'invited' ? 'expiring' : status === 'paused' ? 'expired' : 'neutral';
 }
 
-// Arnold V2: 1 = Lunes … 7 = Domingo (0 también se lee como domingo).
+// 1 = Lunes … 7 = Domingo (0 también se lee como domingo).
 export function dayName(day) {
   return ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][day] || 'Día';
 }

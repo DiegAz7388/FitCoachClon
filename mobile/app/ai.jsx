@@ -88,6 +88,7 @@ export default function AiRoutine() {
         placeholder="Ej. dolor de rodilla derecha" placeholderTextColor={colors.muted} />
       {error ? <Text style={{ color: colors.red, marginTop: 12 }}>{error}</Text> : null}
       <Button title={busy ? 'Generando tu rutina…' : 'Generar rutina'} loading={busy} style={{ marginTop: 20 }} onPress={generate} />
+      {busy ? <T.muted style={{ textAlign: 'center', marginTop: 8 }}>La IA suele tardar entre 10 y 40 segundos.</T.muted> : null}
     </Screen>
   );
 }

@@ -86,8 +86,15 @@ export async function addMeasurement(values) {
   });
 }
 
+const AI_TIMEOUT_MS = 120_000; // la función de Supabase corta a los 150 s
+
 export async function generateRoutine(answers) {
-  const { data, error } = await supabase.functions.invoke('generate-routine', { body: { answers } });
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('La IA tardó demasiado en responder. Intenta de nuevo en un momento.')), AI_TIMEOUT_MS);
+  });
+  const { data, error } = await Promise.race([supabase.functions.invoke('generate-routine', { body: { answers } }), timeout])
+    .finally(() => clearTimeout(timer));
   if (error) {
     let message = 'No se pudo generar la rutina.';
     try { message = (await error.context.json()).error || message; } catch { /* sin cuerpo */ }

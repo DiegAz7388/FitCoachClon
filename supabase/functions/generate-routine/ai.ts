@@ -21,6 +21,10 @@ export function parseJsonText(text: string): Plan {
 }
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+// Límites de tiempo: la función de Supabase corta a los 150 s, así que cada llamada a la IA tiene su propio límite.
+export const timeouts = { listMs: 15_000, generateMs: 50_000 };
+const timedOut = (error: unknown) => error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+const TOO_SLOW = 'La IA tardó demasiado en responder. Intenta de nuevo en un momento.';
 let discoveredModel: string | null = null; // caché mientras la función siga activa
 
 type GeminiModel = { name: string; supportedGenerationMethods?: string[] };
@@ -44,7 +48,13 @@ export function pickFlashModel(models: GeminiModel[]): string | null {
 
 async function discoverGeminiModel(key: string, http: Fetch): Promise<string> {
   if (discoveredModel) return discoveredModel;
-  const response = await http(`${GEMINI_BASE}/models?pageSize=1000`, { headers: { 'x-goog-api-key': key } });
+  let response: Response;
+  try {
+    response = await http(`${GEMINI_BASE}/models?pageSize=1000`, { headers: { 'x-goog-api-key': key }, signal: AbortSignal.timeout(timeouts.listMs) });
+  } catch (error) {
+    if (timedOut(error)) throw new AiError(504, 'Google tardó demasiado en responder. Intenta de nuevo en un momento.');
+    throw error;
+  }
   if (!response.ok) {
     const detail = await response.text();
     console.error('Gemini models', response.status, detail);
@@ -95,6 +105,7 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const send = (generationConfig: Record<string, unknown>, extra = '') => http(url, {
     method: 'POST',
+    signal: AbortSignal.timeout(timeouts.generateMs),
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
@@ -104,12 +115,12 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
   });
 
   const call = async (generationConfig: Record<string, unknown>, extra = '') => {
-    let response = await send(generationConfig, extra);
+    let response = await send(generationConfig, extra).catch((error) => { throw timedOut(error) ? new AiError(504, TOO_SLOW) : error; });
     for (const wait of retry.delaysMs) {
       if (![500, 502, 503, 504].includes(response.status)) break;
       console.warn(`Gemini ${response.status}; reintento en ${wait} ms`);
       await sleep(wait);
-      response = await send(generationConfig, extra);
+      response = await send(generationConfig, extra).catch((error) => { throw timedOut(error) ? new AiError(504, TOO_SLOW) : error; });
     }
     return response;
   };
@@ -141,13 +152,14 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
 async function askOpenAI(system: string, prompt: string, key: string, model: string, http: Fetch): Promise<Plan> {
   const response = await http('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
+    signal: AbortSignal.timeout(timeouts.generateMs),
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
       messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
       response_format: { type: 'json_schema', json_schema: { name: 'rutina', strict: true, schema: PLAN_SCHEMA } },
     }),
-  });
+  }).catch((error) => { throw timedOut(error) ? new AiError(504, TOO_SLOW) : error; });
   if (!response.ok) {
     const detail = await response.text();
     console.error('OpenAI', response.status, detail);

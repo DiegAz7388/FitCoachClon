@@ -2,7 +2,7 @@ import { useFitCoach } from '../state.jsx';
 
 const NAV_ITEMS = [
   ['dashboard', '⌂', 'Resumen'],
-  ['clients', '♙', 'Clientes'],
+  ['clients', '♙', 'Pacientes'],
   ['routines', '⌁', 'Rutinas'],
   ['exercises', '◈', 'Ejercicios'],
   ['progress', '◷', 'Progreso'],
@@ -10,8 +10,7 @@ const NAV_ITEMS = [
 ];
 
 export default function Shell({ children }) {
-  const { view, navigate, online, isRemote, isConfigured } = useFitCoach();
-  const remoteLabel = isRemote ? 'Arnold V2 conectado' : isConfigured ? 'Arnold V2 · iniciar sesión' : 'Demo local · Arnold V2 pendiente';
+  const { view, navigate, online, user, signOut } = useFitCoach();
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -29,7 +28,8 @@ export default function Shell({ children }) {
         <div className="sidebar-footer">
           <div className="connection">
             <strong><span className={`online-dot ${online ? '' : 'offline-dot'}`} />{online ? 'Con conexión' : 'Sin conexión'}</strong>
-            {remoteLabel}
+            <span className="session-email" title={user?.email}>{user?.email}</span>
+            <button type="button" className="link-button session-logout" onClick={signOut}>Cerrar sesión</button>
           </div>
         </div>
       </aside>

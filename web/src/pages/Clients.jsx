@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import Shell from '../components/Shell.jsx';
-import Topbar, { ConnectButton, NewClientButton } from '../components/Topbar.jsx';
+import Topbar, { NewClientButton } from '../components/Topbar.jsx';
 import { StatusPill } from '../components/common.jsx';
 import { useFitCoach } from '../state.jsx';
 
@@ -12,10 +12,10 @@ export default function Clients() {
   const open = (client) => openModal({ type: 'client', clientId: client.id });
   return (
     <Shell>
-      <Topbar title="Clientes" eyebrow="Expedientes y seguimiento"><ConnectButton /><NewClientButton /></Topbar>
+      <Topbar title="Pacientes" eyebrow="Expedientes y seguimiento"><NewClientButton /></Topbar>
       <section className="card">
         <div className="toolbar">
-          <input className="field" placeholder="Buscar cliente..." value={search} onChange={(event) => setSearch(event.target.value)} />
+          <input className="field" placeholder="Buscar paciente..." value={search} onChange={(event) => setSearch(event.target.value)} />
           <select className="select" value={clientFilter} onChange={(event) => setClientFilter(event.target.value)}>
             <option value="all">Todos los estados</option>
             <option value="active">Activos</option>
@@ -28,7 +28,7 @@ export default function Clients() {
       <section className="card">
         <div className="table-wrap">
           <table className="table">
-            <thead><tr><th>Cliente</th><th>Contacto</th><th>Objetivo</th><th>Estado</th><th /></tr></thead>
+            <thead><tr><th>Paciente</th><th>Contacto</th><th>Objetivo</th><th>Estado</th><th /></tr></thead>
             <tbody>
               {rows.map((client) => (
                 <tr key={client.id}>
@@ -42,7 +42,7 @@ export default function Clients() {
                   <td><button className="button small" onClick={() => open(client)}>Abrir</button></td>
                 </tr>
               ))}
-              {!rows.length && <tr><td colSpan="5" className="empty">No hay clientes con este filtro.</td></tr>}
+              {!rows.length && <tr><td colSpan="5" className="empty">No hay pacientes con este filtro.</td></tr>}
             </tbody>
           </table>
         </div>

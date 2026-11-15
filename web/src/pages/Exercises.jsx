@@ -6,7 +6,7 @@ import { exerciseSubtitle } from '../lib/format.js';
 import { useFitCoach } from '../state.jsx';
 
 export default function Exercises() {
-  const { exercises, isRemote, openModal, toast } = useFitCoach();
+  const { exercises, openModal } = useFitCoach();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const categories = useMemo(() => [...new Set(exercises.map((exercise) => exercise.category).filter(Boolean))].sort(), [exercises]);
@@ -21,9 +21,6 @@ export default function Exercises() {
   return (
     <Shell>
       <Topbar title="Biblioteca de ejercicios" eyebrow="Catálogo local y sin conexión">
-        <button className="button" disabled={!isRemote} onClick={() => toast('El catálogo completo ya se consulta localmente. Los ejercicios de una rutina se sincronizan al guardarla.')}>
-          Sincronizar seleccionados
-        </button>
       </Topbar>
       <section className="card">
         <div className="toolbar">

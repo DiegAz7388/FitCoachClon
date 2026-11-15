@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/common.jsx';
 import { emptyPlanner, finalize, setDraft, summarize, toggleDay } from '../lib/dayPlanner.js';
 import { EXERCISE_MEDIA_BASE } from '../lib/format.js';
 import { useFitCoach } from '../state.jsx';
 
-// Arnold V2: 1 = Lunes … 7 = Domingo.
+// 1 = Lunes … 7 = Domingo (como en la base de datos).
 const DAY_OPTIONS = [[1, 'Lunes'], [2, 'Martes'], [3, 'Miércoles'], [4, 'Jueves'], [5, 'Viernes'], [6, 'Sábado'], [7, 'Domingo']];
 const TIMED_HINT = /plank|plancha|hold|wall sit|isometric|jump rope|run|bike|cardio/i;
 
@@ -47,7 +47,7 @@ export function SetConfig({ cfg, onChange }) {
 }
 
 export default function RoutineModal({ clientId = '' }) {
-  const { clients, isRemote } = useFitCoach();
+  const { clients } = useFitCoach();
   const [tab, setTab] = useState('manual');
   const [client, setClient] = useState(String(clientId || clients[0]?.id || ''));
   return (
@@ -57,15 +57,13 @@ export default function RoutineModal({ clientId = '' }) {
         <button type="button" className={tab === 'ai' ? 'active' : ''} onClick={() => setTab('ai')}>✦ Con IA</button>
       </div>
       <div className="form-grid" style={{ marginBottom: 12 }}>
-        <label>Cliente
+        <label>Paciente
           <select className="select" value={client} onChange={(event) => setClient(event.target.value)} required>
             {clients.map((item) => <option key={item.id} value={String(item.id)}>{item.full_name}</option>)}
           </select>
         </label>
       </div>
-      {tab === 'manual' ? <ManualBuilder clientId={client} /> : isRemote ? <AiBuilder clientId={client} /> : (
-        <div className="status-banner warn">Conecta Arnold V2 para generar rutinas con IA. La generación se hace en el servidor; la clave de la IA nunca está en el panel.</div>
-      )}
+      {tab === 'manual' ? <ManualBuilder clientId={client} /> : <AiBuilder clientId={client} />}
     </Modal>
   );
 }
@@ -213,14 +211,16 @@ function AiBuilder({ clientId }) {
   const [answers, setAnswers] = useState({ goal: 'general', experience_level: 'beginner', training_location: 'gym', days_per_week: 3, session_minutes: 45, limitations: '' });
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const elapsed = useElapsed(Boolean(busy));
   const set = (key, numeric) => (event) => setAnswers({ ...answers, [key]: numeric ? Number(event.target.value) : event.target.value });
 
   async function propose() {
-    setBusy('propose');
+    setBusy('propose'); setError('');
     try {
       const { plan: result, request_id: requestId } = await proposeAiRoutine(clientId, answers);
       setPlan({ ...result, requestId, days: result.days.map((day) => ({ ...day, exercises: day.exercises.map((e) => ({ ...e, cfg: toCfg(e) })) })) });
-    } catch (error) { toast(error.message); } finally { setBusy(''); }
+    } catch (err) { setError(err.message); } finally { setBusy(''); }
   }
 
   async function assign() {
@@ -230,7 +230,8 @@ function AiBuilder({ clientId }) {
     };
     if (!reviewed.days.length) { toast('La rutina no tiene ejercicios.'); return; }
     setBusy('assign');
-    try { await assignAiRoutine(clientId, answers, reviewed, plan.requestId); } catch (error) { toast(error.message); setBusy(''); }
+    setError('');
+    try { await assignAiRoutine(clientId, answers, reviewed, plan.requestId); } catch (err) { setError(err.message); setBusy(''); }
   }
 
   const updateExercise = (dayIndex, exIndex, patch) => setPlan((current) => ({
@@ -269,8 +270,11 @@ function AiBuilder({ clientId }) {
         <label>Lesiones o limitaciones<input className="field" value={answers.limitations} onChange={set('limitations')} placeholder="Ej. rodilla derecha" /></label>
       </div>
       <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
-        <button type="button" className="button primary" onClick={propose} disabled={Boolean(busy)}>{busy === 'propose' ? 'Generando…' : plan ? '✦ Generar otra propuesta' : '✦ Generar propuesta'}</button>
+        <button type="button" className="button primary" onClick={propose} disabled={Boolean(busy)}>{busy === 'propose' ? `Generando… ${elapsed} s` : plan ? '✦ Generar otra propuesta' : '✦ Generar propuesta'}</button>
+        {busy === 'propose' ? <span className="muted ai-wait">La IA suele tardar entre 10 y 40 segundos.</span> : null}
       </div>
+
+      {error ? <div className="status-banner danger ai-error" role="alert">{error}</div> : null}
 
       {plan && (
         <div style={{ marginTop: 8 }}>
@@ -313,3 +317,15 @@ const fromCfg = (exerciseId, cfg, notes) => ({
   rest_seconds: cfg.rest_seconds === '' ? 60 : Number(cfg.rest_seconds),
   notes: notes || null,
 });
+
+// Segundos transcurridos mientras `running` es verdadero (para mostrar el avance de la IA).
+function useElapsed(running) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (!running) { setSeconds(0); return undefined; }
+    const started = Date.now();
+    const id = setInterval(() => setSeconds(Math.round((Date.now() - started) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [running]);
+  return seconds;
+}

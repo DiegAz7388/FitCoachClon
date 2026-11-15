@@ -1,9 +1,10 @@
-// Acceso a Arnold V2 (Supabase REST + Auth) con la publishable key y la sesión del usuario.
-// Mismas tablas y consultas que la versión anterior del panel.
+// Acceso a Supabase (REST + Auth) con la publishable key y la sesión del nutriólogo.
 import { config } from '../config.js';
 import { dayName } from './format.js';
 
-const SESSION_KEY = 'fitcoach-arnold-v2-session';
+const SESSION_KEY = 'fitcoach-admin-session';
+const STAFF_ROLES = ['trainer', 'admin'];
+const AI_TIMEOUT_MS = 120_000; // la función de Supabase corta a los 150 s
 
 export function readSession() {
   try { return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch { return null; }
@@ -11,19 +12,80 @@ export function readSession() {
 export function saveSession(session) { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
 export function clearSession() { localStorage.removeItem(SESSION_KEY); }
 
-export function createArnoldClient(getSession) {
-  async function api(path, options = {}) {
-    const session = getSession();
-    if (!session?.access_token) throw new Error('Inicia sesión en Arnold V2 antes de sincronizar.');
+export const roleOf = (session) => session?.user?.app_metadata?.role || 'patient';
+export const isStaff = (session) => STAFF_ROLES.includes(roleOf(session));
+
+// Mensajes de error de Supabase en español.
+export function friendlyError(raw) {
+  let message = raw;
+  try { const data = JSON.parse(raw); message = data.message || data.error_description || data.msg || raw; } catch { /* texto plano */ }
+  if (/Invalid login credentials/i.test(message)) return 'Correo o contraseña incorrectos.';
+  if (/Email not confirmed/i.test(message)) return 'Esta cuenta aún no confirma su correo.';
+  if (/JWT expired|invalid JWT/i.test(message)) return 'Tu sesión expiró. Vuelve a iniciar sesión.';
+  if (/Only authenticated trainers/i.test(message)) return 'Tu cuenta no tiene permiso para crear pacientes.';
+  if (/row-level security/i.test(message)) return 'Tu cuenta no tiene permiso para esta acción.';
+  if (/Failed to fetch|NetworkError/i.test(message)) return 'Sin conexión con el servidor. Revisa tu internet.';
+  return message;
+}
+
+async function authRequest(path, body) {
+  const response = await fetch(`${config.supabaseUrl}/auth/v1/${path}`, {
+    method: 'POST',
+    headers: { apikey: config.supabasePublishableKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(friendlyError(JSON.stringify(result)) || 'No se pudo iniciar sesión.');
+  return result;
+}
+
+export async function signInWithPassword(email, password) {
+  const session = await authRequest('token?grant_type=password', { email, password });
+  if (!isStaff(session)) throw new Error('Esta cuenta es de paciente. Los pacientes usan la app FitCoach en su celular.');
+  return session;
+}
+
+const refreshSession = (session) => authRequest('token?grant_type=refresh_token', { refresh_token: session.refresh_token });
+
+// onSession(nueva) se llama al renovar el acceso; onExpired() si ya no se puede renovar.
+export function createArnoldClient(getSession, { onSession = () => {}, onExpired = () => {} } = {}) {
+  let refreshing = null;
+  async function renew() {
+    const current = getSession();
+    if (!current?.refresh_token) { onExpired(); throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.'); }
+    refreshing ||= refreshSession(current)
+      .then((next) => { onSession(next); return next; })
+      .catch(() => { onExpired(); throw new Error('Tu sesión expiró. Vuelve a iniciar sesión.'); })
+      .finally(() => { refreshing = null; });
+    return refreshing;
+  }
+
+  async function send(path, options, session) {
     const headers = new Headers(options.headers || {});
     headers.set('apikey', config.supabasePublishableKey);
     headers.set('Authorization', `Bearer ${session.access_token}`);
     if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    const response = await fetch(`${config.supabaseUrl}${path}`, { ...options, headers });
-    if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || `Error ${response.status}`);
+    try {
+      return await fetch(`${config.supabaseUrl}${path}`, { ...options, headers });
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      throw new Error('Sin conexión con el servidor. Revisa tu internet.');
     }
+  }
+
+  // Petición autenticada: renueva el acceso si está por vencer o si el servidor lo rechaza (401).
+  async function authorized(path, options = {}) {
+    let session = getSession();
+    if (!session?.access_token) throw new Error('Inicia sesión para continuar.');
+    if (session.expires_at && session.expires_at * 1000 < Date.now() + 60_000) session = await renew();
+    let response = await send(path, options, session);
+    if (response.status === 401) response = await send(path, options, await renew());
+    return response;
+  }
+
+  async function api(path, options = {}) {
+    const response = await authorized(path, options);
+    if (!response.ok) throw new Error(friendlyError(await response.text()) || `Error ${response.status}`);
     if (response.status === 204) return null;
     // Los POST sin "return=representation" responden 201 con cuerpo vacío.
     const text = await response.text();
@@ -64,7 +126,7 @@ export function createArnoldClient(getSession) {
     return { clients, routines };
   }
 
-  // Alta de cliente con la función de Arnold V2 (asigna al nutriólogo y el estado invited/active).
+  // Alta de cliente con fc_create_client (asigna al nutriólogo y el estado invited/active).
   async function createClient(client) {
     return api('/rest/v1/rpc/fc_create_client', {
       method: 'POST',
@@ -75,7 +137,7 @@ export function createArnoldClient(getSession) {
     });
   }
 
-  // Busca en fc_exercises los ejercicios del catálogo (solo un admin puede crear ejercicios en Arnold V2).
+  // Busca en fc_exercises los ejercicios del catálogo (solo un admin puede crear ejercicios).
   async function findExerciseIds(exercises) {
     const names = [...new Set(exercises.map((e) => e.name.trim()))];
     const list = names.map((n) => `"${n.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',');
@@ -90,7 +152,7 @@ export function createArnoldClient(getSession) {
     const exercises = routine.days.flatMap((day) => day.exercises);
     const ids = await findExerciseIds(exercises);
     // La rutina nueva reemplaza a la activa: la anterior se archiva.
-    // (is_active es una columna generada en Arnold V2; no se puede escribir.)
+    // (is_active es una columna generada; no se puede escribir.)
     await api(`/rest/v1/fc_routines?client_id=eq.${Number(routine.client_id)}&archived_at=is.null`, {
       method: 'PATCH', body: JSON.stringify({ archived_at: new Date().toISOString() }),
     });
@@ -128,27 +190,26 @@ export function createArnoldClient(getSession) {
   // Rutina con IA (Edge Function generate-routine). Sin `plan` pide una propuesta;
   // con `plan` guarda la propuesta revisada por el nutriólogo.
   async function generateRoutine(clientId, answers, plan, requestId) {
-    const session = getSession();
-    const response = await fetch(`${config.supabaseUrl}/functions/v1/generate-routine`, {
-      method: 'POST',
-      headers: { apikey: config.supabasePublishableKey, Authorization: `Bearer ${session?.access_token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: Number(clientId), answers, plan, request_id: requestId, save: Boolean(plan) }),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || `Error ${response.status} al generar la rutina.`);
-    return result;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+    try {
+      const response = await authorized('/functions/v1/generate-routine', {
+        method: 'POST',
+        signal: controller.signal,
+        body: JSON.stringify({ client_id: Number(clientId), answers, plan, request_id: requestId, save: Boolean(plan) }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (response.status === 404) throw new Error('La función de IA no está publicada en Supabase (generate-routine).');
+      if (response.status === 546 || response.status === 504) throw new Error('La IA tardó demasiado en responder. Intenta de nuevo.');
+      if (!response.ok) throw new Error(result.error || friendlyError(result.message || '') || `Error ${response.status} al generar la rutina.`);
+      return result;
+    } catch (error) {
+      if (error.name === 'AbortError') throw new Error('La IA tardó demasiado en responder. Intenta de nuevo en un momento.');
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   return { api, loadRemoteData, createClient, createRoutine, generateRoutine };
-}
-
-export async function signInWithPassword(email, password) {
-  const response = await fetch(`${config.supabaseUrl}/auth/v1/token?grant_type=password`, {
-    method: 'POST',
-    headers: { apikey: config.supabasePublishableKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error_description || result.msg || 'No se pudo iniciar sesión.');
-  return result;
 }

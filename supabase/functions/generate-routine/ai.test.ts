@@ -23,7 +23,7 @@ const calls: { url: string; body: any; headers: any; retried?: boolean }[] = [];
 let mode = 'ok';
 let available = ['gemini-3.5-flash', 'gemini-3.5-pro'];
 const fake = (async (url: string, init: RequestInit = {}) => {
-  calls.push({ url, body: init.body ? JSON.parse(String(init.body)) : null, headers: init.headers });
+  calls.push({ url, body: init.body ? JSON.parse(String(init.body)) : null, headers: init.headers, hasSignal: Boolean(init.signal) } as any);
   if (String(url).includes('/models?')) {
     if (mode === 'bad-key') return new Response('API key not valid', { status: 400 });
     return new Response(JSON.stringify({ models: available.map((n) => m(n)) }), { status: 200 });
@@ -33,6 +33,7 @@ const fake = (async (url: string, init: RequestInit = {}) => {
   if (!available.includes(model!)) return new Response('model not found', { status: 404 });
   if (mode === 'reject-schema' && calls.filter((c) => c.url.includes(':generateContent')).length === 1) return new Response('Unknown name "responseJsonSchema"', { status: 400 });
   if (mode === '429') return new Response('quota', { status: 429 });
+  if (mode === 'slow') { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; }
   if (mode === '503-once' && !calls.some((c) => c.retried)) { calls[calls.length - 1].retried = true; return new Response('{"error":{"message":"The model is overloaded"}}', { status: 503 }); }
   if (mode === '503') return new Response('{"error":{"message":"The model is overloaded"}}', { status: 503 });
   if (mode === '403') return new Response('{"error":{"code":403,"message":"Generative Language API has not been used in project 123 before or it is disabled."}}', { status: 403 });
@@ -44,6 +45,7 @@ let r = await generatePlanWithAI('sys', 'prompt', env({ GEMINI_API_KEY: 'k1' }),
 const gen = () => calls.filter((c) => c.url.includes(':generateContent'));
 assert(r.name === 'P' && calls[0].url.includes('/models?') && gen()[0].url.includes('/models/gemini-3.5-flash:generateContent'), 'sin GEMINI_MODEL descubre y usa el Flash disponible');
 assert(gen()[0].headers['x-goog-api-key'] === 'k1' && !gen()[0].url.includes('k1'), 'clave en encabezado (no en la URL)');
+assert(calls.every((c: any) => c.hasSignal), 'todas las llamadas a Google tienen límite de tiempo');
 assert(gen()[0].body.generationConfig.responseJsonSchema && gen()[0].body.systemInstruction, 'pide JSON con esquema e instrucciones de sistema');
 
 calls.length = 0;
@@ -72,6 +74,10 @@ for (const [md, status, re] of [['503', 503, /saturado/], ['403', 500, /has not 
   try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake); } catch (e) { e2 = e; }
   assert(e2 instanceof AiError && e2.status === status && re.test((e2 as Error).message), `${md}: muestra la causa real → ${(e2 as Error).message}`);
 }
+
+calls.length = 0; mode = 'slow'; let slowErr: unknown;
+try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake); } catch (e) { slowErr = e; }
+assert(slowErr instanceof AiError && slowErr.status === 504 && /tardó demasiado/.test((slowErr as Error).message), 'si Gemini no contesta a tiempo, error claro (504)');
 
 calls.length = 0; mode = 'ok';
 r = await generatePlanWithAI('s', 'p', env({ OPENAI_API_KEY: 'sk' }), fake);

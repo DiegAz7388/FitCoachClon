@@ -3,11 +3,11 @@ import { dayName, textStatus } from '../lib/format.js';
 import { useFitCoach } from '../state.jsx';
 
 export default function ClientModal({ clientId }) {
-  const { clients, routines, openModal, isRemote } = useFitCoach();
-  const client = clients.find((item) => String(item.id) === String(clientId)) || { full_name: 'Cliente sin asignar', id: '' };
+  const { clients, routines, openModal } = useFitCoach();
+  const client = clients.find((item) => String(item.id) === String(clientId)) || { full_name: 'Paciente sin asignar', id: '' };
   const routine = routines.find((item) => String(item.client_id) === String(client.id));
   return (
-    <Modal title={client.full_name} subtitle="Expediente de cliente">
+    <Modal title={client.full_name} subtitle="Expediente del paciente">
       <div className="detail-columns">
         <div>
           <div className="detail-list">
@@ -16,11 +16,11 @@ export default function ClientModal({ clientId }) {
             <DetailLine label="Objetivo">{client.goal || 'Sin definir'}</DetailLine>
             <DetailLine label="Estatura">{client.height_cm ? `${client.height_cm} cm` : 'Sin registrar'}</DetailLine>
             <DetailLine label="Estado">{textStatus(client.status)}</DetailLine>
-            {isRemote && <DetailLine label="App móvil">{client.user_id ? 'Vinculada' : 'Sin vincular'}</DetailLine>}
+            {<DetailLine label="App móvil">{client.user_id ? 'Vinculada' : 'Sin vincular'}</DetailLine>}
           </div>
           <h3 style={{ marginTop: 19 }}>Notas del entrenador</h3>
           <p className="muted">{client.notes || 'Sin notas registradas.'}</p>
-          {isRemote && !client.user_id && client.email ? <p className="muted" style={{ fontSize: 12 }}>Para usar la app, el paciente debe crear su cuenta con <strong>{client.email}</strong>.</p> : null}
+          {!client.user_id && client.email ? <p className="muted" style={{ fontSize: 12 }}>Para usar la app, el paciente debe crear su cuenta con <strong>{client.email}</strong>.</p> : null}
         </div>
         <div>
           <h3>Rutina asignada</h3>

@@ -1,4 +1,5 @@
 import { useFitCoach } from './state.jsx';
+import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Clients from './pages/Clients.jsx';
 import Routines from './pages/Routines.jsx';
@@ -9,13 +10,14 @@ import ClientModal from './modals/ClientModal.jsx';
 import NewClientModal from './modals/NewClientModal.jsx';
 import RoutineModal from './modals/RoutineModal.jsx';
 import ExerciseModal from './modals/ExerciseModal.jsx';
-import LoginModal from './modals/LoginModal.jsx';
 
 const PAGES = { dashboard: Dashboard, clients: Clients, routines: Routines, exercises: Exercises, progress: Progress, settings: Settings };
-const MODALS = { client: ClientModal, 'new-client': NewClientModal, routine: RoutineModal, exercise: ExerciseModal, login: LoginModal };
+const MODALS = { client: ClientModal, 'new-client': NewClientModal, routine: RoutineModal, exercise: ExerciseModal };
 
 export default function App() {
-  const { view, modal, toastMessage } = useFitCoach();
+  const { signedIn, loading, view, modal, toastMessage } = useFitCoach();
+  if (!signedIn) return <Login />;
+  if (loading) return <main className="login-screen"><div className="loading-spinner" aria-label="Cargando" /></main>;
   const Page = PAGES[view] || Dashboard;
   const ModalComponent = modal ? MODALS[modal.type] : null;
   return (
