@@ -1,7 +1,7 @@
 // Ejecutar: npx tsx ai.test.ts  (o deno run ai.test.ts)
 declare const process: { exit(code: number): never };
 // — prueba los proveedores con respuestas simuladas (sin red).
-import { AiError, generatePlanWithAI, parseJsonText, pickFlashModel, retry } from './ai.ts';
+import { AiError, geminiTuning, generatePlanWithAI, parseJsonText, pickFlashModel, retry } from './ai.ts';
 retry.delaysMs = [1, 1];
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error('FALLÓ: ' + msg); console.log('✔', msg); };
 const plan = { name: 'P', summary: 's', days: [{ day_of_week: 1, label: 'Lunes', exercises: [] }] };
@@ -32,6 +32,8 @@ const fake = (async (url: string, init: RequestInit = {}) => {
   const model = String(url).match(/models\/([^:]+):/)?.[1];
   if (!available.includes(model!)) return new Response('model not found', { status: 404 });
   if (mode === 'reject-schema' && calls.filter((c) => c.url.includes(':generateContent')).length === 1) return new Response('Unknown name "responseJsonSchema"', { status: 400 });
+  const lastBody = calls[calls.length - 1].body;
+  if (mode === 'reject-thinking' && lastBody?.generationConfig?.thinkingConfig) return new Response('{"error":{"message":"Invalid JSON payload received. Unknown name \\"thinkingLevel\\" at generation_config.thinking_config"}}', { status: 400 });
   if (mode === '429') return new Response('quota', { status: 429 });
   if (mode === 'slow') { const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e; }
   if (mode === '503-once' && !calls.some((c) => c.retried)) { calls[calls.length - 1].retried = true; return new Response('{"error":{"message":"The model is overloaded"}}', { status: 503 }); }
@@ -65,6 +67,15 @@ for (const [md, status, model] of [['429', 429, 'gemini-3.8-flash'], ['bad-key',
   try { await generatePlanWithAI('s', 'p', env(model ? { GEMINI_API_KEY: 'k', GEMINI_MODEL: model } : { GEMINI_API_KEY: 'k', GEMINI_MODEL: 'retirado' }), fake); } catch (e) { err = e; }
   assert(err instanceof AiError && err.status === status, `error claro para ${md}: ${(err as Error).message}`);
 }
+
+assert(JSON.stringify(geminiTuning('gemini-3.8-flash')) === '{"thinkingConfig":{"thinkingLevel":"low"}}' && !('temperature' in geminiTuning('gemini-3.8-flash')), 'Gemini 3: razonamiento "low" y temperatura por defecto');
+assert(geminiTuning('gemini-flash-latest').thinkingConfig && geminiTuning('gemini-2.5-flash').temperature === 0.7, 'alias latest con "low"; Gemini 2.x conserva su temperatura');
+calls.length = 0; mode = 'ok'; available = ['gemini-3.8-flash'];
+await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake);
+assert(gen()[0].body.generationConfig.thinkingConfig?.thinkingLevel === 'low' && !('temperature' in gen()[0].body.generationConfig), 'la petición a Gemini 3 pide razonamiento "low"');
+calls.length = 0; mode = 'reject-thinking';
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake);
+assert(r.name === 'P' && gen().length === 2 && !gen()[1].body.generationConfig.thinkingConfig && gen()[1].body.generationConfig.responseJsonSchema, 'si el modelo no acepta el ajuste, reintenta sin él (conservando el esquema)');
 
 calls.length = 0; mode = '503-once';
 r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake);

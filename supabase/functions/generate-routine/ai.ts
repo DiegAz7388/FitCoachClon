@@ -22,7 +22,7 @@ export function parseJsonText(text: string): Plan {
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Límites de tiempo: la función de Supabase corta a los 150 s, así que cada llamada a la IA tiene su propio límite.
-export const timeouts = { listMs: 15_000, generateMs: 50_000 };
+export const timeouts = { listMs: 15_000, generateMs: 75_000 };
 const timedOut = (error: unknown) => error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 const TOO_SLOW = 'La IA tardó demasiado en responder. Intenta de nuevo en un momento.';
 let discoveredModel: string | null = null; // caché mientras la función siga activa
@@ -101,6 +101,14 @@ function googleMessage(detail: string) {
   try { return String(JSON.parse(detail)?.error?.message ?? detail).slice(0, 240); } catch { return detail.slice(0, 240); }
 }
 
+// Gemini 3 y posteriores razonan al nivel "high" si no se indica; para armar una rutina basta "low",
+// que responde mucho más rápido. Google recomienda dejar la temperatura en su valor por defecto (1.0).
+export function geminiTuning(model: string): Record<string, unknown> {
+  const major = Number(model.match(/^gemini-(\d+)/)?.[1] ?? 0);
+  if (major >= 3 || /^gemini-flash(-lite)?-latest$/.test(model)) return { thinkingConfig: { thinkingLevel: 'low' } };
+  return { temperature: 0.7 };
+}
+
 async function askGeminiModel(system: string, prompt: string, key: string, model: string, http: Fetch): Promise<Plan> {
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const send = (generationConfig: Record<string, unknown>, extra = '') => http(url, {
@@ -110,12 +118,17 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: [{ role: 'user', parts: [{ text: prompt + extra }] }],
-      generationConfig: { temperature: 0.7, ...generationConfig },
+      generationConfig,
     }),
   });
 
   const call = async (generationConfig: Record<string, unknown>, extra = '') => {
-    let response = await send(generationConfig, extra).catch((error) => { throw timedOut(error) ? new AiError(504, TOO_SLOW) : error; });
+    const started = Date.now();
+    let response = await send(generationConfig, extra).catch((error) => {
+      console.error(`Gemini ${model}: sin respuesta tras ${Math.round((Date.now() - started) / 1000)} s`);
+      throw timedOut(error) ? new AiError(504, TOO_SLOW) : error;
+    });
+    console.log(`Gemini ${model}: ${response.status} en ${((Date.now() - started) / 1000).toFixed(1)} s`);
     for (const wait of retry.delaysMs) {
       if (![500, 502, 503, 504].includes(response.status)) break;
       console.warn(`Gemini ${response.status}; reintento en ${wait} ms`);
@@ -125,12 +138,23 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
     return response;
   };
 
-  // 1) JSON con esquema estricto. 2) Si la API no acepta el campo del esquema, JSON con el esquema en las instrucciones.
-  let response = await call({ responseMimeType: 'application/json', responseJsonSchema: PLAN_SCHEMA });
+  // Intentos (cada uno solo si el anterior fue rechazado con 400, que llega al instante):
+  // 1) ajuste de razonamiento + JSON con esquema; 2) sin el ajuste si el modelo no lo acepta;
+  // 3) sin el campo de esquema (el esquema va en las instrucciones).
+  let tuning = geminiTuning(model);
+  let response = await call({ ...tuning, responseMimeType: 'application/json', responseJsonSchema: PLAN_SCHEMA });
   if (response.status === 404) throw new ModelNotFound(model);
   if (response.status === 400) {
+    const detail = await response.clone().text();
+    if (/thinking/i.test(detail) && 'thinkingConfig' in tuning) {
+      console.warn('Gemini rechazó thinkingConfig:', detail);
+      tuning = {};
+      response = await call({ responseMimeType: 'application/json', responseJsonSchema: PLAN_SCHEMA });
+    }
+  }
+  if (response.status === 400) {
     console.warn('Gemini rechazó responseJsonSchema:', await response.text());
-    response = await call({ responseMimeType: 'application/json' },
+    response = await call({ ...tuning, responseMimeType: 'application/json' },
       `\n\nResponde ÚNICAMENTE con un objeto JSON que cumpla este JSON Schema:\n${JSON.stringify(PLAN_SCHEMA)}`);
   }
   if (!response.ok) {
