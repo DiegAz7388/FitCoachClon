@@ -1,7 +1,8 @@
 // Ejecutar: npx tsx ai.test.ts  (o deno run ai.test.ts)
 declare const process: { exit(code: number): never };
 // — prueba los proveedores con respuestas simuladas (sin red).
-import { AiError, generatePlanWithAI, parseJsonText, pickFlashModel } from './ai.ts';
+import { AiError, generatePlanWithAI, parseJsonText, pickFlashModel, retry } from './ai.ts';
+retry.delaysMs = [1, 1];
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error('FALLÓ: ' + msg); console.log('✔', msg); };
 const plan = { name: 'P', summary: 's', days: [{ day_of_week: 1, label: 'Lunes', exercises: [] }] };
 const gem = (text: string) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), { status: 200 });
@@ -18,7 +19,7 @@ assert(pickFlashModel([m('gemini-3.5-flash-preview-09-2026'), m('gemini-3.1-flas
 assert(pickFlashModel([m('gemini-3.1-flash-lite'), m('gemini-3.5-pro')]) === 'gemini-3.1-flash-lite', 'por último un Flash-Lite');
 assert(pickFlashModel([m('gemini-3.5-flash-image', ['generateContent']), m('gemini-3.5-flash-tts')]) === null, 'ignora variantes de imagen/voz');
 
-const calls: { url: string; body: any; headers: any }[] = [];
+const calls: { url: string; body: any; headers: any; retried?: boolean }[] = [];
 let mode = 'ok';
 let available = ['gemini-3.5-flash', 'gemini-3.5-pro'];
 const fake = (async (url: string, init: RequestInit = {}) => {
@@ -32,6 +33,9 @@ const fake = (async (url: string, init: RequestInit = {}) => {
   if (!available.includes(model!)) return new Response('model not found', { status: 404 });
   if (mode === 'reject-schema' && calls.filter((c) => c.url.includes(':generateContent')).length === 1) return new Response('Unknown name "responseJsonSchema"', { status: 400 });
   if (mode === '429') return new Response('quota', { status: 429 });
+  if (mode === '503-once' && !calls.some((c) => c.retried)) { calls[calls.length - 1].retried = true; return new Response('{"error":{"message":"The model is overloaded"}}', { status: 503 }); }
+  if (mode === '503') return new Response('{"error":{"message":"The model is overloaded"}}', { status: 503 });
+  if (mode === '403') return new Response('{"error":{"code":403,"message":"Generative Language API has not been used in project 123 before or it is disabled."}}', { status: 403 });
   return gem(JSON.stringify(plan));
 }) as typeof fetch;
 
@@ -58,6 +62,15 @@ for (const [md, status, model] of [['429', 429, 'gemini-3.8-flash'], ['bad-key',
   calls.length = 0; mode = md; let err: unknown;
   try { await generatePlanWithAI('s', 'p', env(model ? { GEMINI_API_KEY: 'k', GEMINI_MODEL: model } : { GEMINI_API_KEY: 'k', GEMINI_MODEL: 'retirado' }), fake); } catch (e) { err = e; }
   assert(err instanceof AiError && err.status === status, `error claro para ${md}: ${(err as Error).message}`);
+}
+
+calls.length = 0; mode = '503-once';
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake);
+assert(r.name === 'P' && gen().length === 2, 'si Gemini está saturado (503) reintenta y funciona');
+for (const [md, status, re] of [['503', 503, /saturado/], ['403', 500, /has not been used in project/]] as const) {
+  calls.length = 0; mode = md; let e2: unknown;
+  try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake); } catch (e) { e2 = e; }
+  assert(e2 instanceof AiError && e2.status === status && re.test((e2 as Error).message), `${md}: muestra la causa real → ${(e2 as Error).message}`);
 }
 
 calls.length = 0; mode = 'ok';

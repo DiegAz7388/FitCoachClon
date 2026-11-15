@@ -82,9 +82,18 @@ async function askGemini(system: string, prompt: string, key: string, configured
   }
 }
 
+// Espera entre reintentos cuando Gemini está saturado (503) o falla temporalmente (500/504).
+export const retry = { delaysMs: [1500, 4000] };
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Mensaje legible del error de Google (no contiene datos sensibles) para mostrarlo y diagnosticar.
+function googleMessage(detail: string) {
+  try { return String(JSON.parse(detail)?.error?.message ?? detail).slice(0, 240); } catch { return detail.slice(0, 240); }
+}
+
 async function askGeminiModel(system: string, prompt: string, key: string, model: string, http: Fetch): Promise<Plan> {
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
-  const call = (generationConfig: Record<string, unknown>, extra = '') => http(url, {
+  const send = (generationConfig: Record<string, unknown>, extra = '') => http(url, {
     method: 'POST',
     headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -93,6 +102,17 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
       generationConfig: { temperature: 0.7, ...generationConfig },
     }),
   });
+
+  const call = async (generationConfig: Record<string, unknown>, extra = '') => {
+    let response = await send(generationConfig, extra);
+    for (const wait of retry.delaysMs) {
+      if (![500, 502, 503, 504].includes(response.status)) break;
+      console.warn(`Gemini ${response.status}; reintento en ${wait} ms`);
+      await sleep(wait);
+      response = await send(generationConfig, extra);
+    }
+    return response;
+  };
 
   // 1) JSON con esquema estricto. 2) Si la API no acepta el campo del esquema, JSON con el esquema en las instrucciones.
   let response = await call({ responseMimeType: 'application/json', responseJsonSchema: PLAN_SCHEMA });
@@ -108,7 +128,9 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
     if (response.status === 429) throw new AiError(429, 'Se alcanzó el límite gratuito de Gemini por ahora. Intenta en unos minutos.');
     if (response.status === 400 && /API key/i.test(detail)) throw new AiError(500, 'La clave de Gemini no es válida. Revisa el secreto GEMINI_API_KEY.');
     if (response.status === 404) throw new ModelNotFound(model);
-    throw new AiError(502, 'El servicio de IA no respondió. Intenta de nuevo en unos minutos.');
+    if (response.status === 403) throw new AiError(500, `Google rechazó la clave de Gemini (403): ${googleMessage(detail)}`);
+    if (response.status >= 500) throw new AiError(503, 'Gemini está saturado en este momento. Intenta de nuevo en unos minutos.');
+    throw new AiError(502, `Gemini respondió con un error (${response.status}): ${googleMessage(detail)}`);
   }
   const data = await response.json();
   const text = (data.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('');
@@ -127,8 +149,11 @@ async function askOpenAI(system: string, prompt: string, key: string, model: str
     }),
   });
   if (!response.ok) {
-    console.error('OpenAI', response.status, await response.text());
-    throw new AiError(502, 'El servicio de IA no respondió. Intenta de nuevo en unos minutos.');
+    const detail = await response.text();
+    console.error('OpenAI', response.status, detail);
+    if (response.status === 401) throw new AiError(500, 'La clave de OpenAI no es válida. Revisa el secreto OPENAI_API_KEY.');
+    if (response.status === 429) throw new AiError(429, 'OpenAI rechazó la solicitud por límite o falta de saldo. Revisa la facturación de la cuenta de OpenAI.');
+    throw new AiError(502, `OpenAI respondió con un error (${response.status}): ${googleMessage(detail)}`);
   }
   const completion = await response.json();
   return parseJsonText(completion.choices[0].message.content);
