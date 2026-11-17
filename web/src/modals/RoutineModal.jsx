@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '../components/common.jsx';
-import { emptyPlanner, finalize, setDraft, summarize, toggleDay } from '../lib/dayPlanner.js';
+import { emptyPlanner, finalize, fromDays, setDraft, summarize, toggleDay } from '../lib/dayPlanner.js';
 import { EXERCISE_MEDIA_BASE } from '../lib/format.js';
 import { useFitCoach } from '../state.jsx';
 
@@ -46,10 +46,21 @@ export function SetConfig({ cfg, onChange }) {
   );
 }
 
-export default function RoutineModal({ clientId = '' }) {
-  const { clients } = useFitCoach();
+export default function RoutineModal({ clientId = '', routineId = null }) {
+  const { clients, routines } = useFitCoach();
   const [tab, setTab] = useState('manual');
   const [client, setClient] = useState(String(clientId || clients[0]?.id || ''));
+  const editing = routineId ? routines.find((item) => String(item.id) === String(routineId)) : null;
+
+  if (editing) {
+    const patient = clients.find((item) => String(item.id) === String(editing.client_id));
+    return (
+      <Modal wide title="Editar rutina" subtitle={`${patient?.full_name || 'Paciente'} · Elige un día para agregar, quitar o modificar sus ejercicios. El paciente ve los cambios en la app al guardar.`}>
+        <ManualBuilder clientId={String(editing.client_id)} routine={editing} />
+      </Modal>
+    );
+  }
+
   return (
     <Modal wide title="Constructor de rutina" subtitle="Arma la rutina a mano o deja que la IA proponga una para revisarla antes de asignarla.">
       <div className="builder-tabs">
@@ -68,23 +79,52 @@ export default function RoutineModal({ clientId = '' }) {
   );
 }
 
-function ManualBuilder({ clientId }) {
-  const { exercises, addRoutine, closeModal, toast } = useFitCoach();
+// Buscador del catálogo: un clic agrega el ejercicio.
+function ExercisePicker({ onPick, maxHeight = 380, autoFocus = false }) {
+  const { exercises } = useFitCoach();
   const [search, setSearch] = useState('');
-  const [planner, setPlanner] = useState(emptyPlanner);
-  const [saving, setSaving] = useState(false);
-  const selected = planner.draft;
-  const groups = summarize(planner);
-
   const results = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return exercises
       .filter((exercise) => !needle || exercise.name.toLowerCase().includes(needle) || String(exercise.target || '').toLowerCase().includes(needle))
       .slice(0, 18);
   }, [exercises, search]);
+  return (
+    <div>
+      <input className="field" placeholder="Buscar ejercicio para agregar..." value={search} autoFocus={autoFocus} onChange={(event) => setSearch(event.target.value)} />
+      <div className="list" style={{ marginTop: 10, maxHeight, overflow: 'auto' }}>
+        {results.map((exercise) => (
+          <button type="button" key={exercise.id} className="list-row" onClick={() => onPick(exercise)}>
+            <span className="initials">+</span>
+            <span className="row-content"><strong>{exercise.name}</strong><p>{exercise.target || exercise.category || ''} · {exercise.equipment || ''}</p></span>
+          </button>
+        ))}
+        {!results.length && <p className="muted">Sin resultados.</p>}
+      </div>
+    </div>
+  );
+}
+
+const sameExercise = (a, b) => a.name.trim().toLowerCase() === b.name.trim().toLowerCase();
+
+// Ejercicio guardado en Supabase → elemento editable del constructor.
+const fromSaved = (exercise) => ({ id: `db-${exercise.id}`, name: exercise.name, gif_url: exercise.gif_url, notes: exercise.notes, cfg: toCfg(exercise) });
+
+// Sin `routine` crea una rutina; con `routine` edita esa rutina (se guarda como versión nueva).
+function ManualBuilder({ clientId, routine = null }) {
+  const { addRoutine, closeModal, openModal, toast } = useFitCoach();
+  const [planner, setPlanner] = useState(() => (routine
+    ? fromDays(routine.days.map((day) => ({ day: day.day, exercises: day.exercises.map(fromSaved) })))
+    : emptyPlanner()));
+  const [saving, setSaving] = useState(false);
+  const selected = planner.draft;
+  const groups = summarize(planner);
 
   const setSelected = (updater) => setPlanner((current) => setDraft(current, updater));
-  const add = (exercise) => setSelected((current) => (current.some((item) => String(item.id) === String(exercise.id)) ? current : [...current, { ...exercise, cfg: defaultConfig(exercise) }]));
+  const add = (exercise) => {
+    if (selected.some((item) => sameExercise(item, exercise))) { toast('Ese ejercicio ya está en la lista.'); return; }
+    setSelected((current) => [...current, { ...exercise, cfg: defaultConfig(exercise) }]);
+  };
   const remove = (index) => setSelected((current) => current.filter((_, i) => i !== index));
   const updateCfg = (index, cfg) => setSelected((current) => current.map((item, i) => (i === index ? { ...item, cfg } : item)));
   const move = (index, delta) => setSelected((current) => {
@@ -105,15 +145,17 @@ function ManualBuilder({ clientId }) {
       return { ...exercise, cfg, sets: cfg.sets, reps: cfg.mode === 'time' ? `${cfg.duration_seconds} s` : cfg.reps_min === cfg.reps_max ? String(cfg.reps_min) : `${cfg.reps_min}-${cfg.reps_max}` };
     };
     const form = event.currentTarget;
-    const routine = {
+    const payload = {
       id: `local-routine-${Date.now()}`,
       client_id: clientId,
       name: form.elements.name.value.trim(),
       session_minutes: Number(form.elements.session_minutes.value),
-      days: days.map(({ day, exercises: list }) => ({ day, exercises: list.map(normalize) })),
+      // Los días conservan su nombre (p. ej. "Tren superior" de la IA).
+      days: days.map(({ day, exercises: list }) => ({ day, label: routine?.days.find((d) => d.day === day)?.label, exercises: list.map(normalize) })),
+      base: routine || undefined,
     };
     setSaving(true);
-    try { await addRoutine(routine); } catch (error) { toast(error.message); } finally { setSaving(false); }
+    try { await addRoutine(payload); } catch (error) { toast(error.message); } finally { setSaving(false); }
   }
 
   const activeLabel = planner.active.length ? joinDays(planner.active) : '';
@@ -121,9 +163,9 @@ function ManualBuilder({ clientId }) {
   return (
     <form onSubmit={handleSubmit}>
       <div className="form-grid">
-        <label>Nombre de rutina<input className="field" name="name" required placeholder="Ej. Fuerza base" /></label>
+        <label>Nombre de rutina<input className="field" name="name" required minLength={2} placeholder="Ej. Fuerza base" defaultValue={routine?.name} /></label>
         <label>Duración estimada
-          <select className="select" name="session_minutes" defaultValue="60">
+          <select className="select" name="session_minutes" defaultValue={String(routine?.session_minutes || 60)}>
             <option value="30">30 min</option>
             <option value="45">45 min</option>
             <option value="60">60 min</option>
@@ -163,17 +205,7 @@ function ManualBuilder({ clientId }) {
       </div>
 
       <div className="builder-layout" style={{ marginTop: 17 }}>
-        <div>
-          <input className="field" placeholder="Buscar ejercicio para agregar..." value={search} onChange={(event) => setSearch(event.target.value)} />
-          <div className="list" style={{ marginTop: 10, maxHeight: 380, overflow: 'auto' }}>
-            {results.map((exercise) => (
-              <button type="button" key={exercise.id} className="list-row" onClick={() => add(exercise)}>
-                <span className="initials">+</span>
-                <span className="row-content"><strong>{exercise.name}</strong><p>{exercise.target || exercise.category || ''} · {exercise.equipment || ''}</p></span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <ExercisePicker onPick={add} />
         <div>
           <h3>{activeLabel ? `Ejercicios de ${activeLabel}` : 'Ejercicios seleccionados'}</h3>
           <div className="selected-exercises">
@@ -192,8 +224,8 @@ function ManualBuilder({ clientId }) {
         </div>
       </div>
       <div className="form-actions">
-        <button type="button" className="button" onClick={closeModal}>Cancelar</button>
-        <button className="button primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar rutina'}</button>
+        <button type="button" className="button" onClick={routine ? () => openModal({ type: 'routine-view', clientId }) : closeModal}>Cancelar</button>
+        <button className="button primary" disabled={saving}>{saving ? 'Guardando…' : routine ? 'Guardar cambios' : 'Guardar rutina'}</button>
       </div>
     </form>
   );
@@ -207,7 +239,8 @@ function joinDays(days) {
 
 // Propuesta de la IA → revisión por día → asignación.
 function AiBuilder({ clientId }) {
-  const { proposeAiRoutine, assignAiRoutine, closeModal, toast } = useFitCoach();
+  const { proposeAiRoutine, assignAiRoutine, resolveExerciseIds, closeModal, toast } = useFitCoach();
+  const [adding, setAdding] = useState(null); // índice del día al que se le agregan ejercicios
   const [answers, setAnswers] = useState({ goal: 'general', experience_level: 'beginner', training_location: 'gym', days_per_week: 3, session_minutes: 45, limitations: '' });
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState('');
@@ -216,7 +249,7 @@ function AiBuilder({ clientId }) {
   const set = (key, numeric) => (event) => setAnswers({ ...answers, [key]: numeric ? Number(event.target.value) : event.target.value });
 
   async function propose() {
-    setBusy('propose'); setError('');
+    setBusy('propose'); setError(''); setAdding(null);
     try {
       const { plan: result, request_id: requestId } = await proposeAiRoutine(clientId, answers);
       setPlan({ ...result, requestId, days: result.days.map((day) => ({ ...day, exercises: day.exercises.map((e) => ({ ...e, cfg: toCfg(e) })) })) });
@@ -224,15 +257,30 @@ function AiBuilder({ clientId }) {
   }
 
   async function assign() {
-    const reviewed = {
-      name: plan.name, summary: plan.summary,
-      days: plan.days.map((day) => ({ day_of_week: day.day_of_week, label: day.label, exercises: day.exercises.map((e) => fromCfg(e.exercise_id, e.cfg, e.notes)) })).filter((day) => day.exercises.length),
-    };
-    if (!reviewed.days.length) { toast('La rutina no tiene ejercicios.'); return; }
+    if (!plan.days.some((day) => day.exercises.length)) { toast('La rutina no tiene ejercicios.'); return; }
     setBusy('assign');
     setError('');
-    try { await assignAiRoutine(clientId, answers, reviewed, plan.requestId); } catch (err) { setError(err.message); setBusy(''); }
+    try {
+      // Los ejercicios agregados a mano vienen del catálogo del panel: se busca su id en Supabase.
+      const added = plan.days.flatMap((day) => day.exercises).filter((e) => !e.exercise_id).map((e) => e.name);
+      const ids = added.length ? await resolveExerciseIds(added) : new Map();
+      const reviewed = {
+        name: plan.name, summary: plan.summary,
+        days: plan.days
+          .map((day) => ({ day_of_week: day.day_of_week, label: day.label, exercises: day.exercises.map((e) => fromCfg(e.exercise_id ?? ids.get(e.name.trim()), e.cfg, e.notes)) }))
+          .filter((day) => day.exercises.length),
+      };
+      await assignAiRoutine(clientId, answers, reviewed, plan.requestId);
+    } catch (err) { setError(err.message); setBusy(''); }
   }
+
+  const addToDay = (dayIndex, exercise) => {
+    if (plan.days[dayIndex].exercises.some((e) => sameExercise(e, exercise))) { toast('Ese ejercicio ya está en este día.'); return; }
+    setPlan((current) => ({
+      ...current,
+      days: current.days.map((day, d) => (d !== dayIndex ? day : { ...day, exercises: [...day.exercises, { exercise_id: null, name: exercise.name, notes: null, cfg: defaultConfig(exercise) }] })),
+    }));
+  };
 
   const updateExercise = (dayIndex, exIndex, patch) => setPlan((current) => ({
     ...current,
@@ -291,7 +339,18 @@ function AiBuilder({ clientId }) {
                     <SetConfig cfg={e.cfg} onChange={(cfg) => updateExercise(dayIndex, exIndex, { cfg })} />
                   </div>
                 ))}
+                {!day.exercises.length && <p className="muted">Sin ejercicios: este día no se asignará.</p>}
               </div>
+              {adding === dayIndex ? (
+                <div className="ai-add">
+                  <ExercisePicker onPick={(exercise) => addToDay(dayIndex, exercise)} maxHeight={240} autoFocus />
+                  <button type="button" className="button" style={{ marginTop: 8 }} onClick={() => setAdding(null)}>Listo</button>
+                </div>
+              ) : day.exercises.length >= MAX_AI_EXERCISES ? (
+                <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>Máximo {MAX_AI_EXERCISES} ejercicios por día.</p>
+              ) : (
+                <button type="button" className="button add-exercise" onClick={() => setAdding(dayIndex)}>+ Agregar ejercicio</button>
+              )}
             </div>
           ))}
           <div className="form-actions">
@@ -304,9 +363,12 @@ function AiBuilder({ clientId }) {
   );
 }
 
+// La función de IA guarda hasta 10 ejercicios por día.
+const MAX_AI_EXERCISES = 10;
+
 const toCfg = (e) => (e.duration_seconds
-  ? { sets: e.sets, mode: 'time', reps_min: 10, reps_max: 12, duration_seconds: e.duration_seconds, rest_seconds: e.rest_seconds }
-  : { sets: e.sets, mode: 'reps', reps_min: e.reps_min, reps_max: e.reps_max, duration_seconds: 30, rest_seconds: e.rest_seconds });
+  ? { sets: e.sets || 3, mode: 'time', reps_min: 10, reps_max: 12, duration_seconds: e.duration_seconds, rest_seconds: e.rest_seconds ?? 60 }
+  : { sets: e.sets || 3, mode: 'reps', reps_min: e.reps_min ?? 10, reps_max: e.reps_max ?? e.reps_min ?? 12, duration_seconds: 30, rest_seconds: e.rest_seconds ?? 60 });
 
 const fromCfg = (exerciseId, cfg, notes) => ({
   exercise_id: exerciseId,

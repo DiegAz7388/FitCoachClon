@@ -19,7 +19,7 @@ export default function Routines() {
               const client = clients.find((item) => String(item.id) === String(routine.client_id));
               const exerciseCount = routine.days.reduce((total, day) => total + day.exercises.length, 0);
               return (
-                <button key={routine.id} className="list-row" onClick={() => openModal({ type: 'client', clientId: routine.client_id })}>
+                <button key={routine.id} className="list-row" onClick={() => openModal({ type: 'routine-view', clientId: routine.client_id })}>
                   <span className="initials">⌁</span>
                   <span className="row-content">
                     <strong>{routine.name}</strong>

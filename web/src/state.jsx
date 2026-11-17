@@ -125,12 +125,22 @@ export function FitCoachProvider({ children }) {
     toast('Paciente guardado.');
   }, [arnold, toast]);
 
+  // Con routine.base es la edición de una rutina existente: al terminar se vuelve a la rutina.
   const addRoutine = useCallback(async (routine) => {
     await arnold.createRoutine(routine, sessionRef.current?.user?.id);
     await refresh();
-    setModal(null);
-    toast('Rutina guardada.');
+    setModal(routine.base ? { type: 'routine-view', clientId: routine.client_id } : null);
+    toast(routine.base ? 'Cambios guardados.' : 'Rutina guardada.');
   }, [arnold, refresh, toast]);
+
+  const removeRoutine = useCallback(async (routine) => {
+    await arnold.archiveRoutine(routine.id);
+    await refresh();
+    setModal({ type: 'client', clientId: routine.client_id });
+    toast('Rutina quitada. El historial de entrenamientos se conserva.');
+  }, [arnold, refresh, toast]);
+
+  const resolveExerciseIds = useCallback((names) => arnold.resolveExerciseIds(names), [arnold]);
 
   // Rutina con IA: el nutriólogo pide una propuesta, la revisa y la asigna.
   const proposeAiRoutine = useCallback((clientId, answers) => arnold.generateRoutine(clientId, answers), [arnold]);
@@ -153,7 +163,7 @@ export function FitCoachProvider({ children }) {
     online, isConfigured, signedIn: Boolean(session), loading, authNotice, user, role,
     modal, openModal: setModal, closeModal: () => setModal(null),
     toastMessage, toast,
-    signIn, signOut, reload, addClient, addRoutine, proposeAiRoutine, assignAiRoutine,
+    signIn, signOut, reload, addClient, addRoutine, removeRoutine, resolveExerciseIds, proposeAiRoutine, assignAiRoutine,
   };
 
   return <FitCoachContext.Provider value={value}>{children}</FitCoachContext.Provider>;

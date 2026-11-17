@@ -1,7 +1,7 @@
 // node --test web/test/
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { emptyPlanner, finalize, setDraft, summarize, toggleDay } from '../src/lib/dayPlanner.js';
+import { emptyPlanner, finalize, fromDays, setDraft, summarize, toggleDay } from '../src/lib/dayPlanner.js';
 
 const ex = (id) => ({ id, name: `e${id}`, cfg: { sets: 3 } });
 const add = (s, ...ids) => setDraft(s, (d) => [...d, ...ids.map(ex)]);
@@ -59,4 +59,18 @@ test('domingo (7) se ordena al final', () => {
   let s = add(toggleDay(emptyPlanner(), 7), 1);
   s = add(toggleDay(s, 2), 2);
   assert.deepEqual(finalize(s).map((d) => d.day), [2, 7]);
+});
+
+test('editar una rutina guardada: abre el primer día y conserva los demás', () => {
+  const saved = [{ day: 5, exercises: [ex(3)] }, { day: 1, exercises: [ex(1), ex(2)] }, { day: 3, exercises: [] }];
+  let s = fromDays(saved);
+  assert.deepEqual(s.active, [1]); assert.equal(ids(s.draft), '1,2');
+  s = setDraft(s, (d) => d.filter((e) => e.id !== 2)); // quitar
+  s = add(s, 9);                                       // agregar
+  s.draft[0].cfg.sets = 5;                             // modificar
+  assert.equal(saved[1].exercises[0].cfg.sets, 3, 'no toca la rutina original');
+  s = toggleDay(s, 5);
+  assert.equal(ids(s.draft), '3');
+  assert.deepEqual(finalize(s).map((d) => [d.day, ids(d.exercises)]), [[1, '1,9'], [5, '3']]);
+  assert.deepEqual(fromDays([]), emptyPlanner());
 });

@@ -117,3 +117,22 @@ h3 { margin: 0; font-size: 15px; }
 .session-logout { margin-top: 6px; padding: 0; font-size: 12px; }
 .ai-wait { align-self: center; font-size: 12px; }
 .ai-error { margin-top: 12px; }
+/* Rutina asignada: resumen, vista y edición */
+.routine-card { border: 1px solid var(--border); border-radius: 12px; padding: 13px; margin-top: 10px; }
+.routine-card p { margin: 6px 0 10px; font-size: 13px; }
+.routine-card .day-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.routine-actions { display: flex; gap: 8px; margin-top: 12px; }
+.routine-actions .button { flex: 1; }
+.routine-view { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.routine-view .routine-day { margin-top: 0; }
+.view-exercises { display: grid; gap: 8px; margin-top: 10px; }
+.view-exercise { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; }
+.view-exercise p { margin: 3px 0 0; font-size: 12px; }
+.view-exercise .exercise-thumb { width: 44px; height: 44px; border-radius: 8px; background: #fff; object-fit: contain; flex: 0 0 auto; }
+.view-exercise span.exercise-thumb { background: var(--surface-2); }
+.view-note { font-style: italic; }
+.routine-view-actions { flex-wrap: wrap; align-items: center; }
+.confirm-remove { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; }
+.ai-add { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.add-exercise { margin-top: 8px; }
+@media (max-width: 640px) { .routine-actions { flex-direction: column; } }

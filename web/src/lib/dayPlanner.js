@@ -60,6 +60,16 @@ export function setDraft(state, updater) {
   return { ...state, draft: typeof updater === 'function' ? updater(state.draft) : updater };
 }
 
+// Carga una rutina guardada para editarla ([{ day, exercises }]) con el primer día abierto.
+export function fromDays(days) {
+  const plan = {};
+  for (const { day, exercises } of days) if (exercises?.length) plan[day] = copy(exercises);
+  const first = sortDays(Object.keys(plan).map(Number))[0];
+  if (!first) return emptyPlanner();
+  const { plan: rest, exercises } = checkout(plan, first);
+  return { plan: rest, active: [first], draft: exercises };
+}
+
 // Plan final para guardar: [{ day, exercises }] ordenado de lunes a domingo.
 export function finalize(state) {
   const plan = state.active.length ? commit(state) : state.plan;

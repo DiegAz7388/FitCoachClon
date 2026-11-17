@@ -10,9 +10,10 @@ import ClientModal from './modals/ClientModal.jsx';
 import NewClientModal from './modals/NewClientModal.jsx';
 import RoutineModal from './modals/RoutineModal.jsx';
 import ExerciseModal from './modals/ExerciseModal.jsx';
+import RoutineViewModal from './modals/RoutineViewModal.jsx';
 
 const PAGES = { dashboard: Dashboard, clients: Clients, routines: Routines, exercises: Exercises, progress: Progress, settings: Settings };
-const MODALS = { client: ClientModal, 'new-client': NewClientModal, routine: RoutineModal, exercise: ExerciseModal };
+const MODALS = { client: ClientModal, 'new-client': NewClientModal, routine: RoutineModal, 'routine-view': RoutineViewModal, exercise: ExerciseModal };
 
 export default function App() {
   const { signedIn, loading, view, modal, toastMessage } = useFitCoach();

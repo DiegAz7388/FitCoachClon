@@ -95,14 +95,14 @@ export function createArnoldClient(getSession, { onSession = () => {}, onExpired
   async function loadRemoteData() {
     const [clients, routineRows] = await Promise.all([
       api('/rest/v1/fc_clients?select=*&status=neq.archived&order=created_at.desc'),
-      api('/rest/v1/fc_routines?select=id,client_id,name,source,session_minutes,days_per_week,created_at&client_id=not.is.null&archived_at=is.null&order=created_at.desc'),
+      api('/rest/v1/fc_routines?select=id,client_id,name,source,goal,experience_level,training_location,focus_mode,priority_muscles,preferred_time,session_minutes,days_per_week,created_at&client_id=not.is.null&archived_at=is.null&order=created_at.desc'),
     ]);
     const routines = routineRows.map((routine) => ({ ...routine, days: [] }));
     if (routines.length) {
       const ids = routines.map((routine) => routine.id).join(',');
       const [days, exercises] = await Promise.all([
         api(`/rest/v1/fc_routine_days?select=routine_id,day_of_week,label&routine_id=in.(${ids})&order=day_of_week.asc`),
-        api(`/rest/v1/fc_routine_exercises?select=routine_id,day_of_week,order_index,sets,reps_min,reps_max,rest_seconds,duration_seconds,exercise:fc_exercises(id,name,muscle_group,gif_url,image_url)&routine_id=in.(${ids})&order=order_index.asc`),
+        api(`/rest/v1/fc_routine_exercises?select=routine_id,day_of_week,order_index,sets,reps_min,reps_max,rest_seconds,duration_seconds,notes,exercise:fc_exercises(id,name,muscle_group,gif_url,image_url)&routine_id=in.(${ids})&order=order_index.asc`),
       ]);
       routines.forEach((routine) => {
         routine.days = days.filter((day) => String(day.routine_id) === String(routine.id)).map((day) => ({
@@ -117,8 +117,11 @@ export function createArnoldClient(getSession, { onSession = () => {}, onExpired
               gif_url: item.exercise?.gif_url,
               sets: item.sets,
               reps: item.reps_min == null ? null : item.reps_min === item.reps_max || item.reps_max == null ? String(item.reps_min) : `${item.reps_min}-${item.reps_max}`,
+              reps_min: item.reps_min,
+              reps_max: item.reps_max,
               duration_seconds: item.duration_seconds,
               rest_seconds: item.rest_seconds,
+              notes: item.notes,
             })),
         }));
       });
@@ -148,44 +151,67 @@ export function createArnoldClient(getSession, { onSession = () => {}, onExpired
     return byName;
   }
 
+  // Guarda una rutina nueva o la versión editada de una existente (routine.base = la rutina original).
+  // Arnold V2 no permite modificar ni borrar ejercicios de una rutina (el historial de series apunta a ellos),
+  // así que editar = guardar una versión nueva y archivar la anterior. Si algo falla, se restaura la anterior.
   async function createRoutine(routine, userId) {
     const exercises = routine.days.flatMap((day) => day.exercises);
     const ids = await findExerciseIds(exercises);
-    // La rutina nueva reemplaza a la activa: la anterior se archiva.
-    // (is_active es una columna generada; no se puede escribir.)
-    await api(`/rest/v1/fc_routines?client_id=eq.${Number(routine.client_id)}&archived_at=is.null`, {
-      method: 'PATCH', body: JSON.stringify({ archived_at: new Date().toISOString() }),
-    });
-    const [created] = await api('/rest/v1/fc_routines', {
-      method: 'POST',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({
-        client_id: Number(routine.client_id), created_by: userId, name: routine.name, source: 'trainer',
-        experience_level: 'beginner', training_location: 'gym', focus_mode: 'balanced', priority_muscles: [],
-        session_minutes: routine.session_minutes, days_per_week: routine.days.length,
-      }),
-    });
-    await api('/rest/v1/fc_routine_days', {
-      method: 'POST',
-      body: JSON.stringify(routine.days.map((day) => ({ routine_id: created.id, day_of_week: day.day, label: dayName(day.day) }))),
-    });
-    await api('/rest/v1/fc_routine_exercises', {
-      method: 'POST',
-      body: JSON.stringify(routine.days.flatMap((day) => day.exercises.map((exercise, index) => {
-        const timed = exercise.cfg?.mode === 'time';
-        return {
-          routine_id: created.id, exercise_id: ids.get(exercise.name.trim()), day_of_week: day.day, order_index: index + 1,
-          // Configuración por ejercicio del constructor.
-          sets: exercise.cfg?.sets || 3,
-          reps_min: timed ? null : exercise.cfg?.reps_min || 10,
-          reps_max: timed ? null : exercise.cfg?.reps_max || exercise.cfg?.reps_min || 12,
-          duration_seconds: timed ? exercise.cfg.duration_seconds || 30 : null,
-          rest_seconds: exercise.cfg?.rest_seconds ?? 60,
-        };
-      }))),
-    });
+    const base = routine.base || {};
+    const clientId = Number(routine.client_id);
+    // is_active es una columna generada; se archiva con archived_at.
+    const previous = await api(`/rest/v1/fc_routines?client_id=eq.${clientId}&archived_at=is.null&select=id`, {
+      method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ archived_at: new Date().toISOString() }),
+    }) || [];
+    let created = null;
+    try {
+      [created] = await api('/rest/v1/fc_routines', {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({
+          client_id: clientId, created_by: userId, name: routine.name, source: base.source || 'trainer', goal: base.goal ?? null,
+          experience_level: base.experience_level || 'beginner', training_location: base.training_location || 'gym',
+          focus_mode: base.focus_mode || 'balanced', priority_muscles: base.priority_muscles || [], preferred_time: base.preferred_time ?? null,
+          session_minutes: routine.session_minutes, days_per_week: routine.days.length,
+        }),
+      });
+      await api('/rest/v1/fc_routine_days', {
+        method: 'POST',
+        body: JSON.stringify(routine.days.map((day) => ({ routine_id: created.id, day_of_week: day.day, label: day.label || dayName(day.day) }))),
+      });
+      await api('/rest/v1/fc_routine_exercises', {
+        method: 'POST',
+        body: JSON.stringify(routine.days.flatMap((day) => day.exercises.map((exercise, index) => {
+          const timed = exercise.cfg?.mode === 'time';
+          return {
+            routine_id: created.id, exercise_id: ids.get(exercise.name.trim()), day_of_week: day.day, order_index: index + 1,
+            // Configuración por ejercicio del constructor.
+            sets: exercise.cfg?.sets || 3,
+            reps_min: timed ? null : exercise.cfg?.reps_min || 10,
+            reps_max: timed ? null : exercise.cfg?.reps_max || exercise.cfg?.reps_min || 12,
+            duration_seconds: timed ? exercise.cfg.duration_seconds || 30 : null,
+            rest_seconds: exercise.cfg?.rest_seconds ?? 60,
+            notes: exercise.notes || null,
+          };
+        }))),
+      });
+    } catch (error) {
+      // Deja al paciente con la rutina que tenía.
+      const undo = async (path, body) => { try { await api(path, { method: 'PATCH', body: JSON.stringify(body) }); } catch { /* sin conexión */ } };
+      if (created) await undo(`/rest/v1/fc_routines?id=eq.${created.id}`, { archived_at: new Date().toISOString() });
+      if (previous.length) await undo(`/rest/v1/fc_routines?id=in.(${previous.map((r) => r.id).join(',')})`, { archived_at: null });
+      throw error;
+    }
     return created.id;
   }
+
+  // Quita la rutina al paciente (se archiva; el historial de entrenamientos se conserva).
+  async function archiveRoutine(routineId) {
+    await api(`/rest/v1/fc_routines?id=eq.${Number(routineId)}`, { method: 'PATCH', body: JSON.stringify({ archived_at: new Date().toISOString() }) });
+  }
+
+  // Nombre del catálogo → id en fc_exercises (para ejercicios agregados a mano a una propuesta de la IA).
+  const resolveExerciseIds = (names) => findExerciseIds(names.map((name) => ({ name })));
 
   // Rutina con IA (Edge Function generate-routine). Sin `plan` pide una propuesta;
   // con `plan` guarda la propuesta revisada por el nutriólogo.
@@ -211,5 +237,5 @@ export function createArnoldClient(getSession, { onSession = () => {}, onExpired
     }
   }
 
-  return { api, loadRemoteData, createClient, createRoutine, generateRoutine };
+  return { api, loadRemoteData, createClient, createRoutine, archiveRoutine, resolveExerciseIds, generateRoutine };
 }

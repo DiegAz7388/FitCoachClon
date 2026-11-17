@@ -24,7 +24,7 @@ export default function Routine() {
                 <T.h2>{routine.name}</T.h2>
                 <T.muted>{routine.days.length} días por semana{routine.session_minutes ? ` · ${routine.session_minutes} min por sesión` : ''}</T.muted>
               </View>
-              <Pill color={routine.source === 'ai' ? colors.amber : colors.green}>{routine.source === 'ai' ? 'Con IA' : 'De tu nutriólogo'}</Pill>
+              <Pill color={routine.source === 'fito_ai' ? colors.amber : colors.green}>{routine.source === 'fito_ai' ? 'Con IA' : 'De tu nutriólogo'}</Pill>
             </View>
           </Card>
           {routine.days.map((day) => (

@@ -1,5 +1,7 @@
 import { DetailLine, Modal } from '../components/common.jsx';
 import { dayName, textStatus } from '../lib/format.js';
+
+export const exerciseCount = (routine) => routine.days.reduce((total, day) => total + day.exercises.length, 0);
 import { useFitCoach } from '../state.jsx';
 
 export default function ClientModal({ clientId }) {
@@ -25,26 +27,21 @@ export default function ClientModal({ clientId }) {
         <div>
           <h3>Rutina asignada</h3>
           {routine ? (
-            <div className="routine-day">
+            <div className="routine-card">
               <strong>{routine.name}</strong>
-              <p className="muted">{routine.days.length} día(s) de entrenamiento</p>
-              {routine.days.map((day) => (
-                <div className="routine-day" key={day.day}>
-                  <strong>{day.label || dayName(day.day)}</strong>
-                  <ol>
-                    {day.exercises.map((exercise, index) => (
-                      <li key={`${exercise.id}-${index}`}>
-                        {exercise.name}
-                        {exercise.sets ? <span className="muted"> · {exercise.sets} × {exercise.duration_seconds ? `${exercise.duration_seconds} s` : `${exercise.reps} reps`}{exercise.rest_seconds != null ? ` · descanso ${exercise.rest_seconds} s` : ''}</span> : null}
-                      </li>
-                    ))}
-                    {!day.exercises.length && <li>Sin ejercicios</li>}
-                  </ol>
-                </div>
-              ))}
+              <p className="muted">{routine.days.length} día{routine.days.length === 1 ? '' : 's'} · {exerciseCount(routine)} ejercicios{routine.source === 'fito_ai' ? ' · creada con IA' : ''}</p>
+              <div className="day-summary">
+                {routine.days.map((day) => <span key={day.day} className="pill neutral">{dayName(day.day).slice(0, 3)}</span>)}
+              </div>
+              <div className="routine-actions">
+                <button className="button" onClick={() => openModal({ type: 'routine-view', clientId: client.id })}>Ver rutina</button>
+                <button className="button primary" onClick={() => openModal({ type: 'routine', clientId: client.id, routineId: routine.id })}>Editar</button>
+              </div>
             </div>
           ) : <p className="muted">No tiene una rutina asignada.</p>}
-          <button className="button primary" style={{ marginTop: 12 }} onClick={() => openModal({ type: 'routine', clientId: client.id })}>Asignar rutina</button>
+          <button className={`button${routine ? '' : ' primary'}`} style={{ marginTop: 12 }} onClick={() => openModal({ type: 'routine', clientId: client.id })}>
+            {routine ? 'Asignar rutina nueva' : 'Asignar rutina'}
+          </button>
         </div>
       </div>
     </Modal>
