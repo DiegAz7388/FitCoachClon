@@ -98,7 +98,8 @@ async function askGemini(system: string, prompt: string, key: string, configured
   const deadline = Date.now() + budgetMs;
   let candidates = configured ? [configured] : fallbackOrder(await discoverGeminiModels(key, http)).slice(0, MAX_MODELS);
   const tried: string[] = [];
-  let lastError: unknown = null;
+  let busyError: AiError | null = null; // saturado, lento o con límite: es lo que se informa al final
+  let notFound = false;
 
   for (let i = 0; i < candidates.length && tried.length < MAX_MODELS; i += 1) {
     const model = candidates[i];
@@ -109,12 +110,14 @@ async function askGemini(system: string, prompt: string, key: string, configured
     try {
       return await askGeminiModel(system, prompt, key, model, http, Math.min(timeouts.generateMs, remaining));
     } catch (error) {
-      const notFound = error instanceof ModelNotFound;
-      const busy = error instanceof AiError && (error.status === 503 || error.status === 504);
-      if (!notFound && !busy) throw error;
-      lastError = error;
-      console.warn(`Gemini ${model}: ${notFound ? 'no disponible' : (error as Error).message} → se prueba otro modelo.`);
-      if (notFound) discoveredModels = null; // la lista guardada puede estar vieja
+      const missing = error instanceof ModelNotFound;
+      // 429 = límite del plan alcanzado; Google lo cuenta por modelo, así que otro modelo puede seguir disponible.
+      const busy = error instanceof AiError && (error.status === 503 || error.status === 504 || error.status === 429);
+      if (!missing && !busy) throw error;
+      if (busy && (!busyError || busyError.status !== 429)) busyError = error as AiError; // el límite (429) tiene prioridad
+      if (missing) notFound = true;
+      console.warn(`Gemini ${model}: ${missing ? 'no disponible' : (error as Error).message} → se prueba otro modelo.`);
+      if (missing) discoveredModels = null; // la lista guardada puede estar vieja
       if (i === candidates.length - 1) {
         const more = await discoverGeminiModels(key, http).catch((e) => {
           if (e instanceof AiError && e.status === 500) throw e; // clave inválida: se informa tal cual
@@ -124,10 +127,9 @@ async function askGemini(system: string, prompt: string, key: string, configured
       }
     }
   }
-  if (lastError instanceof ModelNotFound) {
-    throw new AiError(500, `El modelo "${tried[0]}" no está disponible y no se encontró otro. Configura el secreto GEMINI_MODEL.`);
-  }
-  throw lastError ?? new AiError(504, TOO_SLOW);
+  if (busyError) throw busyError;
+  if (notFound) throw new AiError(500, `El modelo "${tried[0]}" no está disponible y no se encontró otro. Configura el secreto GEMINI_MODEL.`);
+  throw new AiError(504, TOO_SLOW);
 }
 
 // Espera entre reintentos cuando Gemini está saturado (503) o falla temporalmente (500/504).
@@ -198,7 +200,7 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
   if (!response.ok) {
     const detail = await response.text();
     console.error('Gemini', response.status, detail);
-    if (response.status === 429) throw new AiError(429, 'Se alcanzó el límite gratuito de Gemini por ahora. Intenta en unos minutos.');
+    if (response.status === 429) throw new AiError(429, 'Se alcanzó el límite de uso de Gemini (por minuto o por día). Intenta más tarde, o activa la facturación de la clave para tener límites más altos.');
     if (response.status === 400 && /API key/i.test(detail)) throw new AiError(500, 'La clave de Gemini no es válida. Revisa el secreto GEMINI_API_KEY.');
     if (response.status === 404) throw new ModelNotFound(model);
     if (response.status === 403) throw new AiError(500, `Google rechazó la clave de Gemini (403): ${googleMessage(detail)}`);
@@ -244,7 +246,7 @@ export async function generatePlanWithAI(system: string, prompt: string, env: En
     try {
       return await askGemini(system, prompt, gemini, env('GEMINI_MODEL')?.trim() || undefined, http, timeouts.totalMs - timeouts.openAiReserveMs);
     } catch (error) {
-      if (!(error instanceof AiError && (error.status === 503 || error.status === 504))) throw error;
+      if (!(error instanceof AiError && [429, 503, 504].includes(error.status))) throw error;
       console.warn(`Gemini no disponible (${error.message}) → se usa OpenAI (${openaiModel}).`);
       return askOpenAI(system, prompt, openai, openaiModel, http, Math.max(10_000, timeouts.totalMs - (Date.now() - started)));
     }

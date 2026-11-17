@@ -22,7 +22,7 @@ assert(pickFlashModel([m('gemini-3.5-flash-image', ['generateContent']), m('gemi
 const calls: { url: string; body: any; headers: any; retried?: boolean }[] = [];
 let mode = 'ok';
 let available = ['gemini-3.5-flash', 'gemini-3.5-pro'];
-let saturated: string[] = []; let slow: string[] = [];
+let saturated: string[] = []; let slow: string[] = []; let limited: string[] = [];
 const fake = (async (url: string, init: RequestInit = {}) => {
   calls.push({ url, body: init.body ? JSON.parse(String(init.body)) : null, headers: init.headers, hasSignal: Boolean(init.signal) } as any);
   if (String(url).includes('/models?')) {
@@ -34,6 +34,7 @@ const fake = (async (url: string, init: RequestInit = {}) => {
   if (!available.includes(model!)) return new Response('model not found', { status: 404 });
   if (saturated.includes(model!)) return new Response('{"error":{"message":"The model is overloaded. Please try again later."}}', { status: 503 });
   if (slow.includes(model!)) { const e = new Error('timeout'); e.name = 'TimeoutError'; throw e; }
+  if (limited.includes(model!)) return new Response('{"error":{"code":429,"message":"You exceeded your current quota"}}', { status: 429 });
   if (mode === 'reject-schema' && calls.filter((c) => c.url.includes(':generateContent')).length === 1) return new Response('Unknown name "responseJsonSchema"', { status: 400 });
   const lastBody = calls[calls.length - 1].body;
   if (mode === 'reject-thinking' && lastBody?.generationConfig?.thinkingConfig) return new Response('{"error":{"message":"Invalid JSON payload received. Unknown name \\"thinkingLevel\\" at generation_config.thinking_config"}}', { status: 400 });
@@ -122,6 +123,16 @@ assert(r.name === 'P' && calls.at(-1)!.url.includes('openai'), 'con ambas claves
 await reset(); saturated = [];
 r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2', OPENAI_API_KEY: 'sk' }), fake);
 assert(r.name === 'P' && !calls.some((c) => c.url.includes('openai')), 'con ambas claves, si Gemini responde no se usa OpenAI');
+await reset(); saturated = []; limited = ['gemini-3.8-flash'];
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake);
+assert(r.name === 'P' && used().join() === 'gemini-3.8-flash,gemini-3.8-flash-lite', 'si un modelo llegó a su límite (429), usa otro sin reintentar el mismo');
+await reset(); limited = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.8-flash-lite']; let quotaErr: unknown;
+try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake); } catch (e) { quotaErr = e; }
+assert(quotaErr instanceof AiError && quotaErr.status === 429 && /límite de uso/.test((quotaErr as Error).message), 'si todos llegaron al límite, avisa del límite: ' + (quotaErr as Error).message);
+await reset();
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2', OPENAI_API_KEY: 'sk' }), fake);
+assert(r.name === 'P' && calls.at(-1)!.url.includes('openai'), 'con límite agotado en Gemini y clave de OpenAI, responde OpenAI');
+limited = [];
 saturated = []; slow = [];
 
 calls.length = 0; mode = 'ok';
