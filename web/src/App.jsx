@@ -1,5 +1,10 @@
 import { useFitCoach } from './state.jsx';
 import Login from './pages/Login.jsx';
+import Welcome from './pages/Welcome.jsx';
+import { readInviteLink } from './lib/invite.js';
+
+// Enlace del correo de invitación (se lee una sola vez: la página lo borra de la barra de direcciones).
+const inviteToken = readInviteLink();
 import Dashboard from './pages/Dashboard.jsx';
 import Clients from './pages/Clients.jsx';
 import Routines from './pages/Routines.jsx';
@@ -17,6 +22,7 @@ const MODALS = { client: ClientModal, 'new-client': NewClientModal, routine: Rou
 
 export default function App() {
   const { signedIn, loading, view, modal, toastMessage } = useFitCoach();
+  if (inviteToken) return <Welcome tokenHash={inviteToken} />;
   if (!signedIn) return <Login />;
   if (loading) return <main className="login-screen"><div className="loading-spinner" aria-label="Cargando" /></main>;
   const Page = PAGES[view] || Dashboard;

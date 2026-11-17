@@ -22,7 +22,7 @@ export default function NewClientModal() {
     try { await addClient(client); } catch (error) { toast(error.message); }
   }
   return (
-    <Modal as="form" title="Nuevo paciente" subtitle="Con su correo, el paciente podrá activar la app de entrenamiento." onSubmit={handleSubmit}>
+    <Modal as="form" title="Nuevo paciente" subtitle="Si agregas su correo, le enviamos una invitación para activar la app de entrenamiento." onSubmit={handleSubmit}>
       <div className="form-grid">
         <label>Nombre completo<input className="field" name="full_name" required /></label>
         <label>Correo<input className="field" name="email" type="email" /></label>

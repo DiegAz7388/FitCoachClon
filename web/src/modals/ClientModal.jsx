@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { DetailLine, Modal } from '../components/common.jsx';
 import { dayName, textStatus } from '../lib/format.js';
 
@@ -5,7 +6,8 @@ export const exerciseCount = (routine) => routine.days.reduce((total, day) => to
 import { useFitCoach } from '../state.jsx';
 
 export default function ClientModal({ clientId }) {
-  const { clients, routines, openModal } = useFitCoach();
+  const { clients, routines, openModal, inviteClient, toast } = useFitCoach();
+  const [inviting, setInviting] = useState(false);
   const client = clients.find((item) => String(item.id) === String(clientId)) || { full_name: 'Paciente sin asignar', id: '' };
   const routine = routines.find((item) => String(item.client_id) === String(client.id));
   return (
@@ -22,7 +24,16 @@ export default function ClientModal({ clientId }) {
           </div>
           <h3 style={{ marginTop: 19 }}>Notas del entrenador</h3>
           <p className="muted">{client.notes || 'Sin notas registradas.'}</p>
-          {!client.user_id && client.email ? <p className="muted" style={{ fontSize: 12 }}>Para usar la app, el paciente debe crear su cuenta con <strong>{client.email}</strong>.</p> : null}
+          {!client.user_id && client.email ? (
+            <div className="invite-box">
+              <p className="muted">Al aceptar la invitación que llega a <strong>{client.email}</strong>, el paciente crea su contraseña y su app queda vinculada.</p>
+              <button className="button" disabled={inviting} onClick={async () => {
+                setInviting(true);
+                try { await inviteClient(client.id); toast(`Invitación enviada a ${client.email}.`); } catch (error) { toast(error.message); }
+                setInviting(false);
+              }}>{inviting ? 'Enviando…' : 'Reenviar invitación'}</button>
+            </div>
+          ) : null}
         </div>
         <div>
           <h3>Rutina asignada</h3>

@@ -1,0 +1,37 @@
+<!--
+  Correo de invitación a FitCoach (Supabase → Authentication → Emails → Invite user).
+  Asunto:  {{ .Data.trainer_name }} te invitó a FitCoach
+  El enlace lleva a la página de bienvenida del panel (Site URL), donde el paciente
+  acepta, confirma su correo y crea su contraseña.
+-->
+<div style="margin:0;padding:24px 12px;background:#0a120d;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#101913;border:1px solid #1f3325;border-radius:18px;">
+    <tr>
+      <td style="padding:32px 28px 8px;">
+        <div style="display:inline-block;background:#6fdc5a;color:#0a120d;font-weight:bold;font-size:15px;padding:6px 12px;border-radius:10px;">FitCoach</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:16px 28px 0;color:#eef7ea;">
+        <h1 style="margin:0 0 12px;font-size:23px;line-height:1.3;">
+          {{ if .Data.trainer_name }}{{ .Data.trainer_name }}{{ else }}Tu nutriólogo{{ end }} te invitó a FitCoach
+        </h1>
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#b9c9b4;">
+          Hola{{ if .Data.first_name }} {{ .Data.first_name }}{{ end }}, en FitCoach vas a encontrar la rutina que te asigne tu nutriólogo,
+          con la animación de cada ejercicio, tus series y descansos, y el registro de tu progreso.
+        </p>
+        <p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:#b9c9b4;">
+          Acepta la invitación para confirmar tu correo y crear tu contraseña.
+        </p>
+        <a href="{{ .SiteURL }}?token_hash={{ .TokenHash }}&type=invite"
+           style="display:inline-block;background:#6fdc5a;color:#0a120d;text-decoration:none;font-weight:bold;font-size:15px;padding:13px 22px;border-radius:12px;">
+          Aceptar invitación
+        </a>
+        <p style="margin:24px 0 0;font-size:12px;line-height:1.6;color:#7f917b;">
+          Esta invitación es para {{ .Email }}. Si no esperabas este correo, puedes ignorarlo.
+        </p>
+      </td>
+    </tr>
+    <tr><td style="padding:24px 28px 28px;"></td></tr>
+  </table>
+</div>

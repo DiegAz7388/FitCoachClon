@@ -38,3 +38,29 @@ Sin esa cuenta, la app se puede mostrar en iPhone con Expo Go mientras tu comput
 
 - **Panel:** crea su usuario en Supabase (**Authentication → Users → Add user**, con *Auto Confirm User*) y dale el rol `trainer` con el SQL de `supabase/README.md`.
 - **App (paciente de prueba):** crea el expediente en el panel con un correo de prueba y crea ese mismo usuario en Supabase con *Auto Confirm User*. Al entrar a la app con ese correo, queda vinculado.
+
+## 5. Invitaciones por correo a los pacientes
+
+Al dar de alta a un paciente con correo, el panel le envía "‹Nutriólogo› te invitó a FitCoach". El paciente acepta,
+confirma su correo, crea su contraseña en la página de bienvenida del panel y su app queda vinculada.
+
+1. **Correo propio (SMTP).** El servicio de correo de prueba de Supabase solo envía al equipo del proyecto (2 por hora).
+   Para el piloto, con una cuenta de Gmail dedicada a FitCoach:
+   - En esa cuenta de Google activa la **verificación en 2 pasos** y crea una **contraseña de aplicación**
+     (https://myaccount.google.com/apppasswords).
+   - Supabase → **Authentication → Emails → SMTP Settings** → *Enable custom SMTP*:
+     Sender email = la cuenta de Gmail · Sender name = `FitCoach` · Host = `smtp.gmail.com` · Port = `465` ·
+     Username = la cuenta de Gmail · Password = la contraseña de aplicación (sin espacios).
+   - Para la versión final conviene un servicio con el dominio del nutriólogo (Resend, Brevo, etc.).
+2. **Plantilla.** Supabase → **Authentication → Emails → Templates → Invite user**:
+   - Subject: `{{ .Data.trainer_name }} te invitó a FitCoach`
+   - Body: el contenido de `supabase/templates/invitacion.html`.
+3. **Site URL.** Supabase → **Authentication → URL Configuration → Site URL** = la dirección del panel en Netlify.
+   El botón del correo lleva ahí.
+4. **Función.** Supabase → **Edge Functions → Deploy a new function → Via editor**, nombre `invite-client`,
+   pega el archivo armado (`npx esbuild supabase/functions/invite-client/index.ts --bundle --packages=external --format=esm`)
+   o usa `npx supabase functions deploy invite-client`.
+5. **Nombre del nutriólogo.** El correo usa `fc_profiles.full_name` de quien da de alta al paciente.
+
+Cuando la app esté en las tiendas, agrega en Netlify las variables `VITE_ANDROID_URL` y `VITE_IOS_URL`
+(Project configuration → Environment variables) y vuelve a publicar: la página de bienvenida mostrará los botones de descarga.

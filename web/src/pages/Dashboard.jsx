@@ -40,7 +40,7 @@ export default function Dashboard() {
         <div className="card">
           <CardHeader title="Atención del día" subtitle="Seguimiento operativo" />
           {urgent
-            ? <div className="notice"><span>●</span><div><strong>{urgent.full_name}</strong><p>Aún no activa su cuenta en la app. Pídele que se registre con {urgent.email || 'su correo'} y lo confirme.</p></div></div>
+            ? <div className="notice"><span>●</span><div><strong>{urgent.full_name}</strong><p>Aún no acepta la invitación que llegó a {urgent.email || 'su correo'}. Puedes reenviarla desde su expediente.</p></div></div>
             : <p className="muted">{clients.length ? 'Todos tus pacientes ya activaron la app.' : 'Sin pendientes por ahora.'}</p>}
           <Activity title="Biblioteca disponible">{exercises.length.toLocaleString('es-MX')} ejercicios con animación e instrucciones.</Activity>
           <Activity title="App de pacientes">{clients.filter((client) => client.user_id).length} de {clients.length} pacientes ya usan la app.</Activity>

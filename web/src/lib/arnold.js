@@ -237,5 +237,14 @@ export function createArnoldClient(getSession, { onSession = () => {}, onExpired
     }
   }
 
-  return { api, loadRemoteData, createClient, createRoutine, archiveRoutine, resolveExerciseIds, generateRoutine };
+  // Correo de invitación (Edge Function invite-client).
+  async function inviteClient(clientId) {
+    const response = await authorized('/functions/v1/invite-client', { method: 'POST', body: JSON.stringify({ client_id: Number(clientId) }) });
+    const result = await response.json().catch(() => ({}));
+    if (response.status === 404 && !result.error) throw new Error('La función de invitaciones no está publicada en Supabase (invite-client).');
+    if (!response.ok) throw new Error(result.error || friendlyError(result.message || '') || `Error ${response.status} al enviar la invitación.`);
+    return result;
+  }
+
+  return { api, loadRemoteData, createClient, createRoutine, archiveRoutine, resolveExerciseIds, generateRoutine, inviteClient };
 }

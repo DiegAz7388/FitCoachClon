@@ -136,3 +136,12 @@ h3 { margin: 0; font-size: 15px; }
 .ai-add { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .add-exercise { margin-top: 8px; }
 @media (max-width: 640px) { .routine-actions { flex-direction: column; } }
+/* Invitación del paciente */
+.invite-box { margin-top: 14px; padding: 12px; border: 1px dashed var(--border); border-radius: 12px; display: grid; gap: 10px; justify-items: start; }
+.invite-box p { margin: 0; font-size: 12px; line-height: 1.5; }
+.welcome-card { max-width: 440px; }
+.welcome-card p.muted { line-height: 1.55; margin: 0; }
+.welcome-form { display: grid; gap: 14px; }
+.welcome-form label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 700; }
+.welcome-downloads { display: grid; gap: 8px; }
+.welcome-downloads .button { justify-content: center; text-align: center; }

@@ -51,7 +51,7 @@ export function FitCoachProvider({ children }) {
   const toast = useCallback((message) => {
     setToastMessage(message);
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastMessage(''), 4000);
+    toastTimer.current = window.setTimeout(() => setToastMessage(''), Math.max(4000, message.length * 70));
   }, []);
 
   const resetData = useCallback(() => {
@@ -122,8 +122,17 @@ export function FitCoachProvider({ children }) {
     const created = await arnold.createClient(client);
     setClients((current) => [created, ...current]);
     setModal(null);
-    toast('Paciente guardado.');
+    if (!created?.email) { toast('Paciente guardado.'); return; }
+    // Con correo: se le envía la invitación a la app.
+    try {
+      await arnold.inviteClient(created.id);
+      toast(`Paciente guardado. Invitación enviada a ${created.email}.`);
+    } catch (error) {
+      toast(`Paciente guardado, pero no se envió la invitación: ${error.message}`);
+    }
   }, [arnold, toast]);
+
+  const inviteClient = useCallback((clientId) => arnold.inviteClient(clientId), [arnold]);
 
   // Con routine.base es la edición de una rutina existente: al terminar se vuelve a la rutina.
   const addRoutine = useCallback(async (routine) => {
@@ -163,7 +172,7 @@ export function FitCoachProvider({ children }) {
     online, isConfigured, signedIn: Boolean(session), loading, authNotice, user, role,
     modal, openModal: setModal, closeModal: () => setModal(null),
     toastMessage, toast,
-    signIn, signOut, reload, addClient, addRoutine, removeRoutine, resolveExerciseIds, proposeAiRoutine, assignAiRoutine,
+    signIn, signOut, reload, addClient, inviteClient, addRoutine, removeRoutine, resolveExerciseIds, proposeAiRoutine, assignAiRoutine,
   };
 
   return <FitCoachContext.Provider value={value}>{children}</FitCoachContext.Provider>;

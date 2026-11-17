@@ -7,3 +7,9 @@ enabled = true
 # Exige un usuario con sesión iniciada (JWT); la función valida además el rol.
 verify_jwt = true
 entrypoint = "./functions/generate-routine/index.ts"
+
+[functions.invite-client]
+enabled = true
+# Solo nutriólogos o administradores con sesión iniciada (la función valida el rol y el permiso sobre el paciente).
+verify_jwt = true
+entrypoint = "./functions/invite-client/index.ts"
