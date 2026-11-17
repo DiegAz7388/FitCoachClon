@@ -1,8 +1,8 @@
 // Ejecutar: npx tsx ai.test.ts  (o deno run ai.test.ts)
 declare const process: { exit(code: number): never };
 // — prueba los proveedores con respuestas simuladas (sin red).
-import { AiError, geminiTuning, generatePlanWithAI, parseJsonText, pickFlashModel, retry } from './ai.ts';
-retry.delaysMs = [1, 1];
+import { AiError, geminiTuning, generatePlanWithAI, parseJsonText, pickFlashModel, rankFlashModels, resetModelCache, retry } from './ai.ts';
+retry.delaysMs = [1]; // igual que producción: un reintento
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error('FALLÓ: ' + msg); console.log('✔', msg); };
 const plan = { name: 'P', summary: 's', days: [{ day_of_week: 1, label: 'Lunes', exercises: [] }] };
 const gem = (text: string) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] }), { status: 200 });
@@ -22,6 +22,7 @@ assert(pickFlashModel([m('gemini-3.5-flash-image', ['generateContent']), m('gemi
 const calls: { url: string; body: any; headers: any; retried?: boolean }[] = [];
 let mode = 'ok';
 let available = ['gemini-3.5-flash', 'gemini-3.5-pro'];
+let saturated: string[] = []; let slow: string[] = [];
 const fake = (async (url: string, init: RequestInit = {}) => {
   calls.push({ url, body: init.body ? JSON.parse(String(init.body)) : null, headers: init.headers, hasSignal: Boolean(init.signal) } as any);
   if (String(url).includes('/models?')) {
@@ -31,6 +32,8 @@ const fake = (async (url: string, init: RequestInit = {}) => {
   if (String(url).includes('openai')) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 });
   const model = String(url).match(/models\/([^:]+):/)?.[1];
   if (!available.includes(model!)) return new Response('model not found', { status: 404 });
+  if (saturated.includes(model!)) return new Response('{"error":{"message":"The model is overloaded. Please try again later."}}', { status: 503 });
+  if (slow.includes(model!)) { const e = new Error('timeout'); e.name = 'TimeoutError'; throw e; }
   if (mode === 'reject-schema' && calls.filter((c) => c.url.includes(':generateContent')).length === 1) return new Response('Unknown name "responseJsonSchema"', { status: 400 });
   const lastBody = calls[calls.length - 1].body;
   if (mode === 'reject-thinking' && lastBody?.generationConfig?.thinkingConfig) return new Response('{"error":{"message":"Invalid JSON payload received. Unknown name \\"thinkingLevel\\" at generation_config.thinking_config"}}', { status: 400 });
@@ -89,6 +92,29 @@ for (const [md, status, re] of [['503', 503, /saturado/], ['403', 500, /has not 
 calls.length = 0; mode = 'slow'; let slowErr: unknown;
 try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k', GEMINI_MODEL: 'gemini-3.8-flash' }), fake); } catch (e) { slowErr = e; }
 assert(slowErr instanceof AiError && slowErr.status === 504 && /tardó demasiado/.test((slowErr as Error).message), 'si Gemini no contesta a tiempo, error claro (504)');
+
+assert(rankFlashModels([m('gemini-3.8-flash'), m('gemini-3.5-flash'), m('gemini-flash-latest'), m('gemini-3.8-flash-lite'), m('gemini-3.9-flash-preview-11-2026')]).join() === 'gemini-3.8-flash,gemini-3.5-flash,gemini-flash-latest,gemini-3.9-flash-preview-11-2026,gemini-3.8-flash-lite', 'ordena los modelos Flash de respaldo');
+
+// Respaldo entre modelos cuando el principal está saturado o no responde
+mode = 'ok'; available = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.8-flash-lite'];
+const reset = async () => { calls.length = 0; resetModelCache(); };
+await reset(); saturated = ['gemini-3.8-flash'];
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake);
+const used = () => gen().map((c) => c.url.match(/models\/([^:]+):/)![1]);
+assert(r.name === 'P' && used().at(-1) === 'gemini-3.5-flash', 'si el modelo principal está saturado (503), usa el siguiente: ' + used().join(' → '));
+
+await reset(); saturated = []; slow = ['gemini-3.8-flash'];
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake);
+assert(r.name === 'P' && used().join() === 'gemini-3.8-flash,gemini-3.5-flash', 'si el principal no responde a tiempo, usa el siguiente');
+
+await reset(); slow = []; saturated = ['gemini-3.8-flash'];
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2', GEMINI_MODEL: 'gemini-3.8-flash' }), fake);
+assert(r.name === 'P' && used().at(-1) === 'gemini-3.5-flash', 'también con GEMINI_MODEL configurado, cambia a otro si está saturado');
+
+await reset(); saturated = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.8-flash-lite']; let allErr: unknown;
+try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake); } catch (e) { allErr = e; }
+assert(allErr instanceof AiError && allErr.status === 503 && new Set(used()).size === 3, 'si los 3 modelos están saturados, avisa que intente más tarde (prueba 3 modelos)');
+saturated = []; slow = [];
 
 calls.length = 0; mode = 'ok';
 r = await generatePlanWithAI('s', 'p', env({ OPENAI_API_KEY: 'sk' }), fake);
