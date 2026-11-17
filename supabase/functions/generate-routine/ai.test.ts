@@ -1,7 +1,7 @@
 // Ejecutar: npx tsx ai.test.ts  (o deno run ai.test.ts)
 declare const process: { exit(code: number): never };
 // — prueba los proveedores con respuestas simuladas (sin red).
-import { AiError, geminiTuning, generatePlanWithAI, parseJsonText, pickFlashModel, rankFlashModels, resetModelCache, retry } from './ai.ts';
+import { AiError, geminiTuning, generatePlanWithAI, parseJsonText, fallbackOrder, pickFlashModel, rankFlashModels, resetModelCache, retry } from './ai.ts';
 retry.delaysMs = [1]; // igual que producción: un reintento
 const assert = (cond: unknown, msg: string) => { if (!cond) throw new Error('FALLÓ: ' + msg); console.log('✔', msg); };
 const plan = { name: 'P', summary: 's', days: [{ day_of_week: 1, label: 'Lunes', exercises: [] }] };
@@ -101,19 +101,27 @@ const reset = async () => { calls.length = 0; resetModelCache(); };
 await reset(); saturated = ['gemini-3.8-flash'];
 r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake);
 const used = () => gen().map((c) => c.url.match(/models\/([^:]+):/)![1]);
-assert(r.name === 'P' && used().at(-1) === 'gemini-3.5-flash', 'si el modelo principal está saturado (503), usa el siguiente: ' + used().join(' → '));
+assert(r.name === 'P' && used().at(-1) === 'gemini-3.8-flash-lite', 'si el principal está saturado (503), usa un Flash-Lite: ' + used().join(' → '));
 
 await reset(); saturated = []; slow = ['gemini-3.8-flash'];
 r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake);
-assert(r.name === 'P' && used().join() === 'gemini-3.8-flash,gemini-3.5-flash', 'si el principal no responde a tiempo, usa el siguiente');
+assert(r.name === 'P' && used().join() === 'gemini-3.8-flash,gemini-3.8-flash-lite', 'si el principal no responde a tiempo, usa el siguiente (Flash-Lite)');
 
 await reset(); slow = []; saturated = ['gemini-3.8-flash'];
 r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2', GEMINI_MODEL: 'gemini-3.8-flash' }), fake);
-assert(r.name === 'P' && used().at(-1) === 'gemini-3.5-flash', 'también con GEMINI_MODEL configurado, cambia a otro si está saturado');
+assert(r.name === 'P' && used().at(-1) === 'gemini-3.8-flash-lite', 'también con GEMINI_MODEL configurado, cambia a otro si está saturado');
 
 await reset(); saturated = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.8-flash-lite']; let allErr: unknown;
 try { await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2' }), fake); } catch (e) { allErr = e; }
 assert(allErr instanceof AiError && allErr.status === 503 && new Set(used()).size === 3, 'si los 3 modelos están saturados, avisa que intente más tarde (prueba 3 modelos)');
+assert(fallbackOrder(['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.8-flash-lite']).slice(0, 3).join() === 'gemini-3.8-flash,gemini-3.8-flash-lite,gemini-3.7-flash', 'respaldo: Flash, luego Flash-Lite, luego otro Flash (caso de los registros)');
+
+await reset(); saturated = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.8-flash-lite'];
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2', OPENAI_API_KEY: 'sk' }), fake);
+assert(r.name === 'P' && calls.at(-1)!.url.includes('openai'), 'con ambas claves, si Gemini está saturado responde OpenAI');
+await reset(); saturated = [];
+r = await generatePlanWithAI('s', 'p', env({ GEMINI_API_KEY: 'k2', OPENAI_API_KEY: 'sk' }), fake);
+assert(r.name === 'P' && !calls.some((c) => c.url.includes('openai')), 'con ambas claves, si Gemini responde no se usa OpenAI');
 saturated = []; slow = [];
 
 calls.length = 0; mode = 'ok';

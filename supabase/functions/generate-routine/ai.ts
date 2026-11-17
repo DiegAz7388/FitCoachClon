@@ -1,7 +1,8 @@
 // Proveedores de IA para generar la rutina. Se elige por los secretos configurados:
 //   GEMINI_API_KEY  → Google Gemini (prioridad; tiene nivel gratuito)
 //   OPENAI_API_KEY  → OpenAI
-// Modelos opcionales: GEMINI_MODEL, OPENAI_MODEL (por defecto gpt-4.1-mini).
+// Modelos opcionales: GEMINI_MODEL, OPENAI_MODEL (por defecto gpt-4.1-mini; conviene fijarlo a un modelo vigente).
+// Con GEMINI_API_KEY y OPENAI_API_KEY a la vez, OpenAI se usa solo si Gemini está saturado.
 // Sin GEMINI_MODEL se consulta a Google qué modelos tiene la clave y se usa el Flash estable más reciente.
 // Si el modelo no existe, está saturado o tarda demasiado, se prueba con el siguiente Flash disponible.
 import { PLAN_SCHEMA, type Plan } from './plan.ts';
@@ -23,7 +24,7 @@ export function parseJsonText(text: string): Plan {
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 // Límites de tiempo: la función de Supabase corta a los 150 s y el panel/app esperan 120 s.
 // Cada modelo tiene hasta generateMs; entre todos los intentos no se pasa de totalMs.
-export const timeouts = { listMs: 15_000, generateMs: 45_000, totalMs: 100_000 };
+export const timeouts = { listMs: 15_000, generateMs: 30_000, totalMs: 100_000, openAiReserveMs: 35_000 };
 const timedOut = (error: unknown) => error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
 const TOO_SLOW = 'La IA tardó demasiado en responder. Intenta de nuevo en un momento.';
 const MAX_MODELS = 3; // modelos distintos a probar si el primero está saturado
@@ -54,6 +55,18 @@ export function rankFlashModels(models: GeminiModel[]): string[] {
 
 export const pickFlashModel = (models: GeminiModel[]): string | null => rankFlashModels(models)[0] ?? null;
 
+// Orden de respaldo: los modelos de una misma familia suelen saturarse al mismo tiempo, así que
+// después del Flash principal se prueba un Flash-Lite (más ligero y con menos demanda) y luego otro Flash.
+export function fallbackOrder(ranked: string[]): string[] {
+  const isLite = (id: string) => /flash-lite/.test(id);
+  const flash = ranked.filter((id) => !isLite(id));
+  const lite = ranked.filter(isLite);
+  const order: string[] = [];
+  if (flash[0]) order.push(flash[0]);
+  if (lite[0]) order.push(lite[0]);
+  return [...order, ...flash.slice(1), ...lite.slice(1)];
+}
+
 async function discoverGeminiModels(key: string, http: Fetch): Promise<string[]> {
   if (discoveredModels) return discoveredModels;
   let response: Response;
@@ -72,7 +85,7 @@ async function discoverGeminiModels(key: string, http: Fetch): Promise<string[]>
   const data = await response.json();
   const models = rankFlashModels(data.models ?? []);
   if (!models.length) throw new AiError(500, 'Tu clave de Gemini no tiene ningún modelo Flash disponible. Configura el secreto GEMINI_MODEL.');
-  console.log('Modelos de Gemini disponibles (en orden):', models.slice(0, MAX_MODELS).join(', '));
+  console.log('Modelos de Gemini a probar (en orden):', fallbackOrder(models).slice(0, MAX_MODELS).join(', '), `· ${models.length} Flash disponibles`);
   discoveredModels = models;
   return models;
 }
@@ -81,9 +94,9 @@ class ModelNotFound extends Error {}
 
 // Prueba el modelo configurado (o el mejor disponible); si no existe, está saturado o tarda demasiado,
 // pasa al siguiente modelo Flash de la clave, sin exceder el tiempo total.
-async function askGemini(system: string, prompt: string, key: string, configured: string | undefined, http: Fetch): Promise<Plan> {
-  const deadline = Date.now() + timeouts.totalMs;
-  let candidates = configured ? [configured] : (await discoverGeminiModels(key, http)).slice(0, MAX_MODELS);
+async function askGemini(system: string, prompt: string, key: string, configured: string | undefined, http: Fetch, budgetMs = timeouts.totalMs): Promise<Plan> {
+  const deadline = Date.now() + budgetMs;
+  let candidates = configured ? [configured] : fallbackOrder(await discoverGeminiModels(key, http)).slice(0, MAX_MODELS);
   const tried: string[] = [];
   let lastError: unknown = null;
 
@@ -107,7 +120,7 @@ async function askGemini(system: string, prompt: string, key: string, configured
           if (e instanceof AiError && e.status === 500) throw e; // clave inválida: se informa tal cual
           return [] as string[];
         });
-        candidates = [...candidates, ...more.filter((m) => !candidates.includes(m))];
+        candidates = [...candidates, ...fallbackOrder(more).filter((m) => !candidates.includes(m))];
       }
     }
   }
@@ -198,10 +211,10 @@ async function askGeminiModel(system: string, prompt: string, key: string, model
   return parseJsonText(text);
 }
 
-async function askOpenAI(system: string, prompt: string, key: string, model: string, http: Fetch): Promise<Plan> {
+async function askOpenAI(system: string, prompt: string, key: string, model: string, http: Fetch, timeoutMs = timeouts.generateMs): Promise<Plan> {
   const response = await http('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    signal: AbortSignal.timeout(timeouts.generateMs),
+    signal: AbortSignal.timeout(timeoutMs),
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model,
@@ -222,8 +235,20 @@ async function askOpenAI(system: string, prompt: string, key: string, model: str
 
 export async function generatePlanWithAI(system: string, prompt: string, env: Env, http: Fetch = fetch): Promise<Plan> {
   const gemini = env('GEMINI_API_KEY');
-  if (gemini) return askGemini(system, prompt, gemini, env('GEMINI_MODEL')?.trim() || undefined, http);
   const openai = env('OPENAI_API_KEY');
-  if (openai) return askOpenAI(system, prompt, openai, env('OPENAI_MODEL') || 'gpt-4.1-mini', http);
+  const openaiModel = env('OPENAI_MODEL')?.trim() || 'gpt-4.1-mini';
+  if (gemini) {
+    if (!openai) return askGemini(system, prompt, gemini, env('GEMINI_MODEL')?.trim() || undefined, http);
+    // Con ambas claves, OpenAI respalda a Gemini cuando todos sus modelos están saturados o tardan.
+    const started = Date.now();
+    try {
+      return await askGemini(system, prompt, gemini, env('GEMINI_MODEL')?.trim() || undefined, http, timeouts.totalMs - timeouts.openAiReserveMs);
+    } catch (error) {
+      if (!(error instanceof AiError && (error.status === 503 || error.status === 504))) throw error;
+      console.warn(`Gemini no disponible (${error.message}) → se usa OpenAI (${openaiModel}).`);
+      return askOpenAI(system, prompt, openai, openaiModel, http, Math.max(10_000, timeouts.totalMs - (Date.now() - started)));
+    }
+  }
+  if (openai) return askOpenAI(system, prompt, openai, openaiModel, http);
   throw new AiError(500, 'Falta configurar GEMINI_API_KEY (o OPENAI_API_KEY) en los secretos de Supabase.');
 }
